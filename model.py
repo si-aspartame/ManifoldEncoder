@@ -32,8 +32,6 @@ class autoencoder(nn.Module):
             Swish(),
             nn.Linear(C, B),
             Swish(),
-            nn.Linear(C, B),
-            Swish(),
             nn.Linear(B, A),
             nn.Tanh())
     
