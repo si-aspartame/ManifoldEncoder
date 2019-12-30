@@ -8,8 +8,6 @@ from torch import nn
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from torchvision.datasets import MNIST
-from torchvision.utils import save_image
 from sklearn.datasets import make_swiss_roll
 import plotly.graph_objects as go
 import chart_studio.plotly as py
@@ -17,19 +15,21 @@ import plotly
 get_ipython().run_line_magic('load_ext', 'autoreload')
 get_ipython().run_line_magic('autoreload', '2')
 
+from maguro import *
 from model import *
-#次元落とさずに3次元でできないか
+#次元落とさずに3次元でできないか(1次元にせずチャンネルを保持)
 
 # %%
 #learning parameter
-num_epochs = 500
-learning_rate = 1e-4
-g_distance = 0.0
+num_epochs = 5096
+learning_rate = 1e-4#1e-4
+early_stopping=50
+g_distance = torch.Tensor()
 g_mse = torch.Tensor()
 
 # %%
 #swissroll parameter
-n_samples = 25600
+n_samples = 32768
 noise = 0.05#0.05
 sr, color = make_swiss_roll(n_samples, noise)#sr=swissroll
 #動的にlossとdistanceに係数をかけて、どちらかに偏重しないようにする
@@ -37,9 +37,11 @@ sr, color = make_swiss_roll(n_samples, noise)#sr=swissroll
 #どちらも出来ないことは許すが、どっちかが出来ることは罰する
 def custom_loss(output, target, distance):
     global g_distance, g_mse
-    g_distance = distance
     g_mse = torch.mean((output - target)**2)
-    loss = (g_distance+g_mse)*(abs(g_distance-g_mse.data.item()))
+    g_distance = distance
+    #1足したほうが色が良く分かれる
+    #distanceが小さくなるとブレが大きくなるので対数を取るなりしたほうがいいかも
+    loss = (g_mse+g_distance)*(1+torch.abs(g_distance-g_mse))#後ろを重視しすぎ
     return loss
 
 
@@ -84,7 +86,7 @@ print(f'min:{sr_min}, max:{sr_max}')
 model = autoencoder().cuda()
 criterion = custom_loss#nn.MSELoss()
 optimizer = torch.optim.Adam(
-    model.parameters(), lr=learning_rate, weight_decay=1e-6)
+    model.parameters(), lr=learning_rate, weight_decay=1e-5)#weight_decay
 
 
 # %%
@@ -93,7 +95,10 @@ print(f"in_tensor:{in_tensor.size()}")
 
 
 # %%
-for epoch in range(num_epochs):
+all_loss=[]
+best_loss=99999
+es_count=0
+for epoch in range(1, num_epochs+1):
     for data in DataLoader(in_tensor, batch_size=BATCH_SIZE, shuffle=True):
         batch = data
         batch = batch.reshape(batch.size(0)*3)#考える必要あり
@@ -106,13 +111,26 @@ for epoch in range(num_epochs):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-    # ===================log========================
-    print(f'epoch [{epoch + 1}/{num_epochs}], loss:{loss.data.item()}, \ng_distance:{g_distance}, g_mse={g_mse}')
-    if epoch % 10 == 0:
-        pass#あとで復元がどれくらいできているかここに書いてもいいかも
+    if loss.data.item() < best_loss:
+        print('[BEST] ', end='')
+        torch.save(model.state_dict(), f'./output/{epoch}.pth')
+        best_loss = loss.data.item()
+        es_count=0
+    es_count += 1
+    print(f'epoch [{epoch}/{num_epochs}], loss:{loss.data.item()}, \ng_distance:{g_distance}, g_mse={g_mse}')
+    all_loss.append([epoch, loss.data.item(), g_distance.data.item(), g_mse.data.item()])
+    if es_count == early_stopping:
+        print('early stopping!')
+        break#early_stopping
 
+#%%
+best_iteration=np.argmin([x[1] for x in all_loss])
+print(f'best_iteration:{all_loss[best_iteration]}')
+print(best_iteration)
 
 # %%
+best_model = autoencoder().cuda()
+best_model.load_state_dict(torch.load(f'./output/{all_loss[best_iteration][0]}.pth'))
 result=np.empty((0,3))
 for n, data in enumerate(DataLoader(in_tensor, batch_size=BATCH_SIZE, shuffle=False)):#シャッフルしない
     print(f'TEST:{n}')
@@ -120,15 +138,11 @@ for n, data in enumerate(DataLoader(in_tensor, batch_size=BATCH_SIZE, shuffle=Fa
     batch = batch.reshape(batch.size(0)*3)
     batch = Variable(batch).cuda()
     # ===================forward=====================
-    output, _ = model(batch)
+    output, _ = best_model(batch)
     result=np.vstack([result, output.data.cpu().numpy().reshape(BATCH_SIZE, INPUT_AXIS)])
     
 #plot_swissroll(reverse_z_score(result, input_mean, input_std), color)
 plot_swissroll(result, color)
-# loss the Variable,
-# loss.data the (presumably size 1) Tensor,
-# loss.data[0] the (python) float at position 0 in the tensor.
-torch.save(model.state_dict(), './autoencoder.pth')
 
 
 # %%
