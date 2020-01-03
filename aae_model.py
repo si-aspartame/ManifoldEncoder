@@ -14,6 +14,21 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 
+n_epochs=200
+batch_size=64
+lr=0.0002
+b1=0.5
+b2=0.999
+n_cpu=10
+latent_dim=10
+img_size=32
+channels=1
+sample_interval=400
+
+img_shape = (1, 32, 32)
+
+Tensor = torch.cuda.FloatTensor
+
 def reparameterization(mu, logvar):
     std = torch.exp(logvar / 2)
     sampled_z = Variable(Tensor(np.random.normal(0, 1, (mu.size(0), latent_dim))))

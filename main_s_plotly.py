@@ -12,6 +12,7 @@ from sklearn.datasets import make_swiss_roll
 import plotly.graph_objects as go
 import chart_studio.plotly as py
 import plotly
+from bayes_opt import BayesianOptimization
 get_ipython().run_line_magic('load_ext', 'autoreload')
 get_ipython().run_line_magic('autoreload', '2')
 
@@ -21,29 +22,39 @@ from model import *
 
 # %%
 #learning parameter
-num_epochs = 5096
-learning_rate = 1e-4#1e-4
+num_epochs = 200
+learning_rate = 0.00009884#1e-4
 early_stopping=50
 g_distance = torch.Tensor()
 g_mse = torch.Tensor()
-
+p1=0.929
+p2=0.173
+wd=0.00005358
+#{'target': -0.4959750175476074, 
+# 'params': {'learning_rate': 4.9381810919946176e-05,
+# 'p1': 0.2831057892577199,
+# 'p2': 0.3855041854229957,
+# 'wd': 3.914557171667492e-05}}
 # %%
 #swissroll parameter
-n_samples = 32768
-noise = 0.05#0.05
+n_samples = 32768#32768
+noise = 0#0.05
 sr, color = make_swiss_roll(n_samples, noise)#sr=swissroll
 #動的にlossとdistanceに係数をかけて、どちらかに偏重しないようにする
 #最初のイテレーションのlossとdistanceを1として、前回下がっていない方の損失を増やす
 #どちらも出来ないことは許すが、どっちかが出来ることは罰する
-def custom_loss(output, target, distance):
+def custom_loss(output, target, distance, lipschitz):
     global g_distance, g_mse
     g_mse = torch.mean((output - target)**2)
     g_distance = distance
-    #1足したほうが色が良く分かれる
-    #distanceが小さくなるとブレが大きくなるので対数を取るなりしたほうがいいかも
-    loss = (g_mse+g_distance)*(1+torch.abs(g_distance-g_mse))#後ろを重視しすぎ
+    #loss = (g_mse+g_distance)*(1+torch.abs(g_distance-g_mse))+lipschitz#後ろを重視しすぎ
+    loss = g_mse + (p1*(g_distance**2)) + (p2*(lipschitz**2))
     return loss
-
+#(m+d)*(1+(d-m))
+#(m+d)-(m+d)(m-d)
+#(m+d)-(m^2-d^2)
+#
+#
 
 # %%
 def z_score(x, axis = None):
@@ -70,9 +81,6 @@ def plot_swissroll(sr, color):
 # %%
 np_sr = np.array(sr)
 #plot_swissroll(sr, color)
-
-
-# %%
 np_sr, input_mean, input_std = z_score(np_sr)#zスコアで標準化
 
 #%%
@@ -86,7 +94,7 @@ print(f'min:{sr_min}, max:{sr_max}')
 model = autoencoder().cuda()
 criterion = custom_loss#nn.MSELoss()
 optimizer = torch.optim.Adam(
-    model.parameters(), lr=learning_rate, weight_decay=1e-5)#weight_decay
+    model.parameters(), lr=learning_rate, weight_decay=wd)#weight_decay
 
 
 # %%
@@ -104,8 +112,8 @@ for epoch in range(1, num_epochs+1):
         batch = batch.reshape(batch.size(0)*3)#考える必要あり
         batch = Variable(batch).cuda()
         # ===================forward=====================
-        output, distance = model(batch)
-        loss = criterion(output, batch, distance)
+        output, distance, lipschitz = model(batch)
+        loss = criterion(output, batch, distance, lipschitz)
         #print(loss)
         # ===================backward====================
         optimizer.zero_grad()
@@ -115,10 +123,15 @@ for epoch in range(1, num_epochs+1):
         print('[BEST] ', end='')
         torch.save(model.state_dict(), f'./output/{epoch}.pth')
         best_loss = loss.data.item()
-        es_count=0
+        es_count = 0
     es_count += 1
-    print(f'epoch [{epoch}/{num_epochs}], loss:{loss.data.item()}, \ng_distance:{g_distance}, g_mse={g_mse}')
-    all_loss.append([epoch, loss.data.item(), g_distance.data.item(), g_mse.data.item()])
+    print(f'epoch [{epoch}/{num_epochs}], loss:{loss.data.item()}, \
+        \n g_mse = {g_mse}, g_distance:{g_distance}, lipschitz:{lipschitz}'
+        )
+    all_loss.append(
+        [epoch, loss.data.item(), g_mse.data.item(), \
+        g_distance.data.item(), lipschitz.data.item()]
+        )
     if es_count == early_stopping:
         print('early stopping!')
         break#early_stopping
@@ -126,7 +139,6 @@ for epoch in range(1, num_epochs+1):
 #%%
 best_iteration=np.argmin([x[1] for x in all_loss])
 print(f'best_iteration:{all_loss[best_iteration]}')
-print(best_iteration)
 
 # %%
 best_model = autoencoder().cuda()
@@ -138,7 +150,7 @@ for n, data in enumerate(DataLoader(in_tensor, batch_size=BATCH_SIZE, shuffle=Fa
     batch = batch.reshape(batch.size(0)*3)
     batch = Variable(batch).cuda()
     # ===================forward=====================
-    output, _ = best_model(batch)
+    output, _, _, = best_model(batch)
     result=np.vstack([result, output.data.cpu().numpy().reshape(BATCH_SIZE, INPUT_AXIS)])
     
 #plot_swissroll(reverse_z_score(result, input_mean, input_std), color)

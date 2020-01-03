@@ -1,3 +1,4 @@
+#%%
 import os
 import numpy as np
 import math
@@ -21,17 +22,6 @@ import torch
 from aae_model import *
 
 os.makedirs("images", exist_ok=True)
-
-n_epochs=200
-batch_size=64
-lr=0.0002
-b1=0.5
-b2=0.999
-n_cpu=10
-latent_dim=10
-img_size=32
-channnels=1
-sample_interval=400
 
 img_shape = (channels, img_size, img_size)
 
@@ -73,9 +63,6 @@ optimizer_G = torch.optim.Adam(
     itertools.chain(encoder.parameters(), decoder.parameters()), lr=lr, betas=(b1, b2)
 )
 optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=lr, betas=(b1, b2))
-
-Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
-
 
 def sample_image(n_row, batches_done):
     """Saves a grid of generated digits"""
