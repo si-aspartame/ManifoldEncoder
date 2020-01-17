@@ -26,10 +26,12 @@ class autoencoder(nn.Module):
             Swish(),
             nn.Linear(C, D))#96,64
         self.decoder = nn.Sequential(
-            nn.Linear(D, C),#96, 96
+            nn.Linear(D, C),#64, 96
             Swish(),
+            nn.Dropout(),
             nn.Linear(C, B),
             Swish(),
+            nn.Dropout(),
             nn.Linear(C, B),
             Swish(),
             nn.Linear(B, A),

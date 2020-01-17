@@ -22,14 +22,12 @@ from model import *
 
 # %%
 #learning parameter
-num_epochs = 200
-learning_rate = 0.00009884#1e-4
-early_stopping=50
+num_epochs = 99999
+learning_rate = 0.0001#1e-4
+early_stopping=100
 g_distance = torch.Tensor()
 g_mse = torch.Tensor()
-p1=0.929
-p2=0.173
-wd=0.00005358
+wd=0.00001
 #{'target': -0.4959750175476074, 
 # 'params': {'learning_rate': 4.9381810919946176e-05,
 # 'p1': 0.2831057892577199,
@@ -47,8 +45,7 @@ def custom_loss(output, target, distance, lipschitz):
     global g_distance, g_mse
     g_mse = torch.mean((output - target)**2)
     g_distance = distance
-    #loss = (g_mse+g_distance)*(1+torch.abs(g_distance-g_mse))+lipschitz#後ろを重視しすぎ
-    loss = g_mse + (p1*(g_distance**2)) + (p2*(lipschitz**2))
+    loss = (g_mse+lipschitz)*(1+torch.abs(lipschitz-g_mse))#+lipschitz後ろを重視しすぎ
     return loss
 #(m+d)*(1+(d-m))
 #(m+d)-(m+d)(m-d)
@@ -80,7 +77,7 @@ def plot_swissroll(sr, color):
 
 # %%
 np_sr = np.array(sr)
-#plot_swissroll(sr, color)
+plot_swissroll(sr, color)
 np_sr, input_mean, input_std = z_score(np_sr)#zスコアで標準化
 
 #%%
@@ -106,6 +103,7 @@ print(f"in_tensor:{in_tensor.size()}")
 all_loss=[]
 best_loss=99999
 es_count=0
+model.train()
 for epoch in range(1, num_epochs+1):
     for data in DataLoader(in_tensor, batch_size=BATCH_SIZE, shuffle=True):
         batch = data
@@ -144,6 +142,7 @@ print(f'best_iteration:{all_loss[best_iteration]}')
 best_model = autoencoder().cuda()
 best_model.load_state_dict(torch.load(f'./output/{all_loss[best_iteration][0]}.pth'))
 result=np.empty((0,3))
+model.eval()
 for n, data in enumerate(DataLoader(in_tensor, batch_size=BATCH_SIZE, shuffle=False)):#シャッフルしない
     print(f'TEST:{n}')
     batch = data
