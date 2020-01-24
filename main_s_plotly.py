@@ -41,11 +41,11 @@ sr, color = make_swiss_roll(n_samples, noise)#sr=swissroll
 #動的にlossとdistanceに係数をかけて、どちらかに偏重しないようにする
 #最初のイテレーションのlossとdistanceを1として、前回下がっていない方の損失を増やす
 #どちらも出来ないことは許すが、どっちかが出来ることは罰する
-def custom_loss(output, target, distance, lipschitz):
+def custom_loss(output, target, distance):
     global g_distance, g_mse
     g_mse = torch.mean((output - target)**2)
     g_distance = distance
-    loss = (g_mse+lipschitz)*(1+torch.abs(lipschitz-g_mse))#+lipschitz後ろを重視しすぎ
+    loss = (g_mse+g_distance)*((1+torch.abs(g_mse-g_distance))**2)
     return loss
 #(m+d)*(1+(d-m))
 #(m+d)-(m+d)(m-d)
@@ -77,7 +77,7 @@ def plot_swissroll(sr, color):
 
 # %%
 np_sr = np.array(sr)
-plot_swissroll(sr, color)
+# plot_swissroll(sr, color)
 np_sr, input_mean, input_std = z_score(np_sr)#zスコアで標準化
 
 #%%
@@ -110,8 +110,8 @@ for epoch in range(1, num_epochs+1):
         batch = batch.reshape(batch.size(0)*3)#考える必要あり
         batch = Variable(batch).cuda()
         # ===================forward=====================
-        output, distance, lipschitz = model(batch)
-        loss = criterion(output, batch, distance, lipschitz)
+        output, distance = model(batch)
+        loss = criterion(output, batch, distance)
         #print(loss)
         # ===================backward====================
         optimizer.zero_grad()
@@ -124,11 +124,11 @@ for epoch in range(1, num_epochs+1):
         es_count = 0
     es_count += 1
     print(f'epoch [{epoch}/{num_epochs}], loss:{loss.data.item()}, \
-        \n g_mse = {g_mse}, g_distance:{g_distance}, lipschitz:{lipschitz}'
+        \n g_mse = {g_mse}, g_distance:{g_distance}'
         )
     all_loss.append(
         [epoch, loss.data.item(), g_mse.data.item(), \
-        g_distance.data.item(), lipschitz.data.item()]
+        g_distance.data.item()]
         )
     if es_count == early_stopping:
         print('early stopping!')
