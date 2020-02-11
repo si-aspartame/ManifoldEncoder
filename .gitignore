@@ -1,5 +1,7 @@
-
+.ipynb_checkpoints*
+*.png
 *.pyc
 *.pth
 *.pyc
 *.pyc
+*.7z

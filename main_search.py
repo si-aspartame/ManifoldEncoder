@@ -27,12 +27,11 @@ do_this_bayes = {
     'wd' : (0.000001, 0.0001)
 }
 
-def custom_loss(output, target, distance, lipschitz, p1, p2):
+def custom_loss(output, target, in_diff_sum, lat_diff_sum):
     global g_distance, g_mse
     g_mse = torch.mean((output - target)**2)
-    g_distance = distance
-    #loss = (g_mse+g_distance)*(1+torch.abs(g_distance-g_mse))+lipschitz#後ろを重視しすぎ
-    loss = g_mse + (p1*(g_distance**2)) + (p2*(lipschitz**2))
+    g_distance = (lat_diff_sum / in_diff_sum).std(dim=0)#比の分散
+    loss = g_mse#(g_mse+g_distance)+(1+(torch.abs(g_mse-g_distance))**2)
     return loss
 
 def z_score(x, axis = None):
@@ -57,8 +56,8 @@ def search_in_train(learning_rate, p1, p2, wd):
             batch = batch.reshape(batch.size(0)*3)#考える必要あり
             batch = Variable(batch).cuda()
             # ===================forward=====================
-            output, distance, lipschitz = model(batch)
-            loss = criterion(output, batch, distance, lipschitz, p1, p2)
+            output, in_diff_sum, lat_diff_sum, _ = model(batch)
+            loss = criterion(output, batch, in_diff_sum, lat_diff_sum)
             #print(loss)
             # ===================backward====================
             optimizer.zero_grad()
@@ -70,12 +69,8 @@ def search_in_train(learning_rate, p1, p2, wd):
             best_loss = loss.data.item()
             es_count=0
         es_count += 1
-        # print(f'epoch [{epoch}/{num_epochs}], loss:{loss.data.item()}, \
-        #     \n g_mse={g_mse}, g_distance:{g_distance}, lipschitz:{lipschitz}'
-        #     )
         all_loss.append(
-            [epoch, loss.data.item(), g_mse.data.item(), \
-            g_distance.data.item(), lipschitz.data.item()]
+            [epoch, loss.data.item(), g_mse.data.item(), g_distance.data.item()]
             )
         if es_count == early_stopping:
             # print('early stopping!')
