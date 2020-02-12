@@ -41,18 +41,22 @@ class autoencoder(nn.Module):
         y = self.encoder(x)
         in_data = x.reshape(BATCH_SIZE, INPUT_AXIS)#32,3
         lat_repr = y.reshape(BATCH_SIZE, INPUT_AXIS-1)#32, 2
+        in_min = torch.min(in_data)
+        lat_min  = torch.min(lat_repr)
         #入力と潜在表現の列方向の合計
         #この合計はマンハッタン距離と同値
         #ユークリッド距離 = マンハッタン距離*√2/2
         in_diff_list = []
         for n in range(BATCH_SIZE):
-            in_sum = torch.sqrt(torch.sum((to_positive+in_data[n])**2))
+            in_sum = torch.sqrt(torch.sum((in_min+in_data[n])**2))
+            #in_sum = torch.sum(in_min+in_data[n])
             in_diff_list.append(in_sum)
         in_diff_sum = torch.stack(in_diff_list, dim=0)
         
         lat_diff_list = []
         for n in range(BATCH_SIZE):
-            lat_sum = torch.sqrt(torch.sum((to_positive+lat_repr[n])**2))
+            lat_sum = torch.sqrt(torch.sum((lat_min+lat_repr[n])**2))
+            #lat_sum = torch.sum(lat_min+lat_repr[n])
             lat_diff_list.append(lat_sum)
         lat_diff_sum = torch.stack(lat_diff_list, dim=0)
 

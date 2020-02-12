@@ -3,6 +3,7 @@ from IPython import get_ipython
 from IPython.display import Image
 import os
 import numpy as np
+import random
 import torch
 import torchvision
 from torch import nn
@@ -36,8 +37,6 @@ wd=0.00005
 n_samples = 32768
 noise = 0.05#0.05
 sr, color = make_swiss_roll(n_samples, noise)#sr=swissroll
-#動的にlossとdistanceに係数をかけて、どちらかに偏重しないようにする
-#最初のイテレーションのlossとdistanceを1として、前回下がっていない方の損失を増やす
 #どちらも出来ないことは許すが、どっちかが出来ることは罰する
 def custom_loss(output, target, in_diff_sum, lat_diff_sum):
     global g_distance, g_mse
@@ -45,18 +44,22 @@ def custom_loss(output, target, in_diff_sum, lat_diff_sum):
     g_mse = torch.mean((output - target)**2)
     KL_divergence = nn.KLDivLoss(reduction="sum")
     SM = nn.Softmax(dim=0)
+
     #全組み合わせの距離について、入力・潜在表現間のダイバージェンスを求める
     #その後、BATCH_SIZE個の全ダイバージェンスについて平均を取る
     g_distance = 0
-    # for n in range(BATCH_SIZE):
-    #     #BATCH_SIZE*BATCH_SIZEの組み合わせに対して一次元ユークリッド距離を取り、分布を求める
-    #     in_euclid_comb = [torch.abs((in_diff_sum[n] - in_diff_sum[m])) for m in range(BATCH_SIZE)]
-    #     in_distance = torch.stack(in_euclid_comb, dim=0)
-    #     lat_euclid_comb = [torch.abs((lat_diff_sum[n] - lat_diff_sum[m])) for m in range(BATCH_SIZE)]
-    #     lat_distance = torch.stack(lat_euclid_comb, dim=0)
-    #     g_distance += KL_divergence(SM(in_distance).log(), SM(lat_distance)) / BATCH_SIZE
-    g_distance = KL_divergence(SM(in_diff_sum).log(), SM(lat_diff_sum))
-    loss = (g_mse+g_distance)*(1+torch.abs(g_mse-g_distance))
+    for n in range(BATCH_SIZE):
+        #BATCH_SIZE*BATCH_SIZEの組み合わせに対して一次元ユークリッド距離を取り、分布を求める
+        in_euclid_comb = [torch.abs((in_diff_sum[n] - in_diff_sum[m])) for m in range(BATCH_SIZE)]
+        in_distance = torch.stack(in_euclid_comb, dim=0)
+        lat_euclid_comb = [torch.abs((lat_diff_sum[n] - lat_diff_sum[m])) for m in range(BATCH_SIZE)]
+        lat_distance = torch.stack(lat_euclid_comb, dim=0)
+        g_distance += KL_divergence(SM(in_distance).log(), SM(lat_distance)) / BATCH_SIZE
+    #g_distance = KL_divergence(SM(in_diff_sum).log(), SM(lat_diff_sum))
+
+    #loss = (g_mse+g_distance)*(1+torch.abs(g_mse-g_distance))
+    #loss = (g_mse+g_distance)*((1+torch.abs(g_mse-g_distance))**2)
+    loss = (g_mse+g_distance)
     return loss
 
 
@@ -76,10 +79,10 @@ def reverse_z_score(x, input_mean, input_std, axis = None):
 def plot_swissroll(sr, color, dim):
     if dim == 3:
         plotly.offline.init_notebook_mode()
-        fig = go.Figure(data=[go.Scatter3d(x=sr[:, 0], y=sr[:, 1], z=sr[:, 2], mode='markers', marker=dict(size=1, color=color,))])# colorscale="burg"))])
+        fig = go.Figure(data=[go.Scatter3d(x=sr[:, 0], y=sr[:, 1], z=sr[:, 2], mode='markers', marker=dict(size=1, color=color, colorscale="blugrn"))])
     elif dim == 2:
         plotly.offline.init_notebook_mode()
-        fig = go.Figure(data=[go.Scatter(x=sr[:, 0], y=sr[:, 1], mode='markers', marker=dict(size=5, color=color))])#, colorscale="burg"))])
+        fig = go.Figure(data=[go.Scatter(x=sr[:, 0], y=sr[:, 1], mode='markers', marker=dict(size=5, color=color, colorscale="blugrn"))])
     return fig
 
 
@@ -98,7 +101,6 @@ def do_plot(model, epoch, g_mse, g_distance):
         output, _, _, lat_repr = model(batch)
         result=np.vstack([result, output.data.cpu().numpy().reshape(BATCH_SIZE, INPUT_AXIS)])
         lat_result=np.vstack([lat_result, lat_repr.data.cpu().numpy().reshape(BATCH_SIZE, INPUT_AXIS-1)])
-        
     file_name = f"{epoch}_{g_mse}_{g_distance}"
     plot_swissroll(result, color, 3).update_layout(title=file_name).write_image(f"./result/{file_name}.png")
     plot_swissroll(lat_result, color, 2).update_layout(title=file_name).write_image(f"./lat/{file_name}.png")
@@ -107,8 +109,8 @@ def do_plot(model, epoch, g_mse, g_distance):
 
 # %%
 np_sr = np.array(sr)
-# sr[:, 0] = sr[:, 0] * 4
-# sr[:, 2] = sr[:, 2] * 4
+sr[:, 0] = sr[:, 0] * 4
+sr[:, 2] = sr[:, 2] * 4
 plot_swissroll(sr, color, 3).update_layout(title=f"Original").write_image(f"./result/{0}.png")
 np_sr, input_mean, input_std = z_score(np_sr)#zスコアで標準化
 
@@ -139,7 +141,8 @@ es_count=0
 frames = []
 for epoch in range(1, num_epochs+1):
     model.train()
-    for data in DataLoader(in_tensor, batch_size=BATCH_SIZE, shuffle=True):
+    data_iter = DataLoader(in_tensor, batch_size=BATCH_SIZE, shuffle=True)
+    for data in data_iter:
         batch = data
         batch = batch.reshape(batch.size(0)*3)#考える必要あり
         batch = Variable(batch).cuda()
@@ -165,7 +168,6 @@ for epoch in range(1, num_epochs+1):
     g_mse_list.append(g_mse.data.item())
     g_distance_list.append(g_distance.data.item())
     do_plot(model, epoch, g_mse, g_distance)
-    #######################################################################ここに点の密集度の罰則をつける
     if es_count == early_stopping:
         print('early stopping!')
         break#early_stopping
@@ -192,24 +194,28 @@ for n, data in enumerate(DataLoader(in_tensor, batch_size = BATCH_SIZE, shuffle 
     result=np.vstack([result, output.data.cpu().numpy().reshape(BATCH_SIZE, INPUT_AXIS)])
     lat_result=np.vstack([lat_result, lat_repr.data.cpu().numpy().reshape(BATCH_SIZE, INPUT_AXIS-1)])
 
+#%%
+sampling_num = 1000
+rnd_idx = [random.randint(0, len(result)) for i in range(sampling_num)]
+rnd_result = np.array([result[i] for i in rnd_idx])
+rnd_lat_result = np.array([lat_result[i] for i in rnd_idx])
+rnd_color = np.array([color[i] for i in rnd_idx])
 
 # %%
-plotly.offline.iplot(plot_swissroll(result, color, 3), filename='decoded swiss roll')
+plotly.offline.iplot(plot_swissroll(rnd_result, rnd_color, 3), filename='decoded swiss roll')
 
 
 # %%
-plotly.offline.iplot(plot_swissroll(lat_result, color, 2), filename='latent representation')
+plotly.offline.iplot(plot_swissroll(rnd_lat_result, rnd_color, 2), filename='latent representation')
 
 
 # %%
 loss_fig = go.Figure()
 
-num=1#移動平均の個数
+num=3#移動平均の個数
 b=np.ones(num)/num
 MA_g_mse_list=np.convolve(g_mse_list, b, mode='same')#移動平均
 MA_g_distance_list=np.convolve(g_distance_list, b, mode='same')#移動平均
-loss_fig.add_trace(go.Scatter(x = list(range(0, es_count)), y = MA_g_mse_list, name='mse'))
-loss_fig.add_trace(go.Scatter(x = list(range(0, es_count)), y = MA_g_distance_list, name='distance'))
+loss_fig.add_trace(go.Scatter(x = list(range(0, len(all_loss))), y = MA_g_mse_list, name='mse'))
+loss_fig.add_trace(go.Scatter(x = list(range(0, len(all_loss))), y = MA_g_distance_list, name='distance'))
 plotly.offline.iplot(loss_fig, filename='mse and distance progress')
-
-
