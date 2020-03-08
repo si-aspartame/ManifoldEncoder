@@ -20,17 +20,20 @@ get_ipython().run_line_magic('load_ext', 'autoreload')
 get_ipython().run_line_magic('autoreload', '2')
 from maguro import *
 from model import *
-
+#入力の並びを分類するネットワークを別に作る
+#乱数でmseとdistanceを入れ替える
+#MSEが下がらなくなったときにエンコーダを更新する（MSE→distanceの順で繰り返す）
+#S字でやってみる
 # %%
 #learning parameter
-num_epochs = 1
-learning_rate = 0.0001#1e-4
+num_epochs = 100
+learning_rate = 0.005#1e-4
 early_stopping = 50
 g_distance = torch.Tensor()
 g_mse = torch.Tensor()
 g_distance_list = []
 g_mse_list = []
-wd=0.00005
+wd=0.003#0.00005
 
 # %%
 #swissroll parameter
@@ -41,24 +44,29 @@ sr, color = make_swiss_roll(n_samples, noise)#sr=swissroll
 def custom_loss(output, target, in_diff_sum, lat_diff_sum):
     global g_distance, g_mse
     
-    g_mse = torch.mean((output - target)**2)
     KL_divergence = nn.KLDivLoss(reduction="sum")
     SM = nn.Softmax(dim=0)
 
-    #全組み合わせの距離について、入力・潜在表現間のダイバージェンスを求める
-    #その後、BATCH_SIZE個の全ダイバージェンスについて平均を取る
-    g_distance = 0
-    for n in range(BATCH_SIZE):
-        #BATCH_SIZE*BATCH_SIZEの組み合わせに対して一次元ユークリッド距離を取り、分布を求める
-        in_euclid_comb = [torch.abs((in_diff_sum[n] - in_diff_sum[m])) for m in range(BATCH_SIZE)]
-        in_distance = torch.stack(in_euclid_comb, dim=0)
-        lat_euclid_comb = [torch.abs((lat_diff_sum[n] - lat_diff_sum[m])) for m in range(BATCH_SIZE)]
-        lat_distance = torch.stack(lat_euclid_comb, dim=0)
-        g_distance += KL_divergence(SM(in_distance).log(), SM(lat_distance)) / BATCH_SIZE
-    #g_distance = KL_divergence(SM(in_diff_sum).log(), SM(lat_diff_sum))
+    ##全組み合わせの距離について、入力・潜在表現間のダイバージェンスを求める
+    ##その後、BATCH_SIZE個の全ダイバージェンスについて平均を取る
+    # g_distance_list = []
+    # in_distance = []
+    # lat_distance = []
+    # for n in range(BATCH_SIZE):
+    #     #BATCH_SIZE*BATCH_SIZEの組み合わせに対して一次元ユークリッド距離を取り、分布を求める
+    #     in_euclid_comb = [torch.abs((in_diff_sum[n] - in_diff_sum[m])) for m in range(BATCH_SIZE)]
+    #     in_distance.append(torch.stack(in_euclid_comb, dim=0))#list(tensor()) ->tensor(tensor())
+    #     lat_euclid_comb = [torch.abs((lat_diff_sum[n] - lat_diff_sum[m])) for m in range(BATCH_SIZE)]
+    #     lat_distance.append(torch.stack(lat_euclid_comb, dim=0))
+    # in_all_distance = torch.stack(in_distance, dim=0)
+    # lat_all_distance = torch.stack(lat_distance, dim=0)
+    # g_distance = KL_divergence(SM(in_all_distance).log(), SM(lat_all_distance))
 
+    g_mse = Variable(torch.mean((output - target)**2), requires_grad = True)
+
+    g_distance = Variable(KL_divergence(SM(in_diff_sum).log(), SM(lat_diff_sum)), requires_grad = True)
+    #loss = (g_mse+g_distance)+torch.abs(g_mse-g_distance)
     #loss = (g_mse+g_distance)*(1+torch.abs(g_mse-g_distance))
-    #loss = (g_mse+g_distance)*((1+torch.abs(g_mse-g_distance))**2)
     loss = (g_mse+g_distance)
     return loss
 
@@ -102,15 +110,15 @@ def do_plot(model, epoch, g_mse, g_distance):
         result=np.vstack([result, output.data.cpu().numpy().reshape(BATCH_SIZE, INPUT_AXIS)])
         lat_result=np.vstack([lat_result, lat_repr.data.cpu().numpy().reshape(BATCH_SIZE, INPUT_AXIS-1)])
     file_name = f"{epoch}_{g_mse}_{g_distance}"
-    plot_swissroll(result, color, 3).update_layout(title=file_name).write_image(f"./result/{file_name}.png")
+    #plot_swissroll(result, color, 3).update_layout(title=file_name).write_image(f"./result/{file_name}.png")
     plot_swissroll(lat_result, color, 2).update_layout(title=file_name).write_image(f"./lat/{file_name}.png")
 
 
 
 # %%
 np_sr = np.array(sr)
-sr[:, 0] = sr[:, 0] * 4
-sr[:, 2] = sr[:, 2] * 4
+# sr[:, 0] = sr[:, 0] * 4
+# sr[:, 2] = sr[:, 2] * 4
 plot_swissroll(sr, color, 3).update_layout(title=f"Original").write_image(f"./result/{0}.png")
 np_sr, input_mean, input_std = z_score(np_sr)#zスコアで標準化
 
