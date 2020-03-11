@@ -25,10 +25,9 @@ from mini_model import *
 
 #%%
 num_epochs = 200
-learning_rate = 1e-4#0.005#
+learning_rate = 1e-4#0.005
 early_stopping = 50
-g_distance = torch.tensor(0.0, requires_grad = True)
-g_distance.requres_grad=True
+g_distance = torch.Tensor().cuda()
 g_distance_list = []
 wd=0.00005
 # %%
@@ -39,9 +38,9 @@ sr, color = make_swiss_roll(n_samples, noise)#sr=swissroll
 #どちらも出来ないことは許すが、どっちかが出来ることは罰する
 def custom_loss(in_diff_sum, lat_diff_sum):
     global g_distance
-    KL_divergence = nn.KLDivLoss(reduction="sum")
-    SM = nn.Softmax(dim=0)
-    g_distance = KL_divergence(SM(in_diff_sum).log(), SM(lat_diff_sum))
+    KL_divergence = nn.KLDivLoss(reduction="sum").cuda()
+    SM = nn.Softmax(dim=0).cuda()
+    g_distance = Variable(KL_divergence(SM(in_diff_sum).log(), SM(lat_diff_sum)), requires_grad = True).cuda()
     return g_distance
 
 # %%
@@ -75,8 +74,8 @@ def do_plot(model, epoch, g_distance):
 
 # %%
 np_sr = np.array(sr)
-sr[:, 0] = sr[:, 0] * 4
-sr[:, 2] = sr[:, 2] * 4
+# sr[:, 0] = sr[:, 0] * 4
+# sr[:, 2] = sr[:, 2] * 4
 plot_swissroll(sr, color, 3).update_layout(title=f"Original").write_image(f"./result/{0}.png")
 np_sr, input_mean, input_std = z_score(np_sr)#zスコアで標準化
 
@@ -91,8 +90,7 @@ print(f'min:{sr_min}, max:{sr_max}')
 # %%
 model = autoencoder().cuda()
 criterion = custom_loss
-optimizer = RAdam(
-    model.parameters(), lr=learning_rate, weight_decay=wd)#weight_decay
+optimizer = RAdam(model.parameters(), lr=learning_rate, weight_decay=wd)#weight_decay
 scheduler = LambdaLR(optimizer, lr_lambda = lambda epoch: 0.95 ** epoch)
 
 # %%
@@ -107,6 +105,8 @@ es_count=0
 frames = []
 for epoch in range(1, num_epochs+1):
     model.train()
+    temp_distance = 0
+    temp_loss = 0
     data_iter = DataLoader(in_tensor, batch_size=BATCH_SIZE, shuffle=True)
     for data in data_iter:
         batch = data
@@ -119,19 +119,21 @@ for epoch in range(1, num_epochs+1):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-    if loss.data.item() < best_loss:
+        temp_distance += g_distance.data.item() / (n_samples / BATCH_SIZE)
+        temp_loss += loss.data.item() / (n_samples / BATCH_SIZE)
+    if temp_loss < best_loss:
         print('[BEST] ', end='')
         torch.save(model.state_dict(), f'./output/{epoch}.pth')
-        best_loss = loss.data.item()
+        best_loss = temp_loss
         es_count = 0
     es_count += 1
-    print(f'epoch [{epoch}/{num_epochs}], loss:{loss.data.item()},         \ng_distance:{g_distance}'
+    print(f'epoch [{epoch}/{num_epochs}], loss:{temp_loss},         \ng_distance:{temp_distance}'
         )
     all_loss.append(
-        [epoch, loss.data.item(), g_distance.data.item()]
+        [epoch, temp_loss, temp_distance]
         )
-    g_distance_list.append(g_distance.data.item())
-    do_plot(model, epoch, g_distance)
+    g_distance_list.append(temp_distance)
+    do_plot(model, epoch, temp_distance)
     if es_count == early_stopping:
         print('early stopping!')
         break#early_stopping
@@ -160,7 +162,7 @@ for n, data in enumerate(DataLoader(in_tensor, batch_size = BATCH_SIZE, shuffle 
 
 #%%
 sampling_num = 1000
-rnd_idx = [random.randint(0, len(lat_result)) for i in range(sampling_num)]
+rnd_idx = [random.randint(0, len(lat_result)-1) for i in range(sampling_num)]
 rnd_lat_result = np.array([lat_result[i] for i in rnd_idx])
 rnd_color = np.array([color[i] for i in rnd_idx])
 

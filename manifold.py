@@ -2,11 +2,13 @@
 from IPython import get_ipython
 from IPython.display import Image
 import os
+import gc
 import numpy as np
 import random
 import torch
 import torchvision
 from torch import nn
+from torch.optim.lr_scheduler import LambdaLR
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from torchvision import transforms
@@ -24,50 +26,36 @@ from model import *
 #乱数でmseとdistanceを入れ替える
 #MSEが下がらなくなったときにエンコーダを更新する（MSE→distanceの順で繰り返す）
 #S字でやってみる
+
 # %%
 #learning parameter
-num_epochs = 100
-learning_rate = 0.005#1e-4
+num_epochs = 10
+learning_rate = 0.001
 early_stopping = 50
 g_distance = torch.Tensor()
 g_mse = torch.Tensor()
 g_distance_list = []
 g_mse_list = []
-wd=0.003#0.00005
+wd = 0.01
 
 # %%
 #swissroll parameter
-n_samples = 32768
+n_samples = 2**10
 noise = 0.05#0.05
 sr, color = make_swiss_roll(n_samples, noise)#sr=swissroll
 #どちらも出来ないことは許すが、どっちかが出来ることは罰する
 def custom_loss(output, target, in_diff_sum, lat_diff_sum):
     global g_distance, g_mse
-    
-    KL_divergence = nn.KLDivLoss(reduction="sum")
-    SM = nn.Softmax(dim=0)
-
-    ##全組み合わせの距離について、入力・潜在表現間のダイバージェンスを求める
-    ##その後、BATCH_SIZE個の全ダイバージェンスについて平均を取る
-    # g_distance_list = []
-    # in_distance = []
-    # lat_distance = []
-    # for n in range(BATCH_SIZE):
-    #     #BATCH_SIZE*BATCH_SIZEの組み合わせに対して一次元ユークリッド距離を取り、分布を求める
-    #     in_euclid_comb = [torch.abs((in_diff_sum[n] - in_diff_sum[m])) for m in range(BATCH_SIZE)]
-    #     in_distance.append(torch.stack(in_euclid_comb, dim=0))#list(tensor()) ->tensor(tensor())
-    #     lat_euclid_comb = [torch.abs((lat_diff_sum[n] - lat_diff_sum[m])) for m in range(BATCH_SIZE)]
-    #     lat_distance.append(torch.stack(lat_euclid_comb, dim=0))
-    # in_all_distance = torch.stack(in_distance, dim=0)
-    # lat_all_distance = torch.stack(lat_distance, dim=0)
-    # g_distance = KL_divergence(SM(in_all_distance).log(), SM(lat_all_distance))
-
-    g_mse = Variable(torch.mean((output - target)**2), requires_grad = True)
+    KL_divergence = nn.KLDivLoss(reduction="sum").cuda()
+    SM = nn.Softmax(dim=0).cuda()
+    # print(f'output:{output}')
+    # print(f'target:{target}')
+    g_mse = torch.mean(torch.sqrt((output - target)**2))
 
     g_distance = Variable(KL_divergence(SM(in_diff_sum).log(), SM(lat_diff_sum)), requires_grad = True)
     #loss = (g_mse+g_distance)+torch.abs(g_mse-g_distance)
     #loss = (g_mse+g_distance)*(1+torch.abs(g_mse-g_distance))
-    loss = (g_mse+g_distance)
+    loss = g_mse+g_distance
     return loss
 
 
@@ -110,15 +98,14 @@ def do_plot(model, epoch, g_mse, g_distance):
         result=np.vstack([result, output.data.cpu().numpy().reshape(BATCH_SIZE, INPUT_AXIS)])
         lat_result=np.vstack([lat_result, lat_repr.data.cpu().numpy().reshape(BATCH_SIZE, INPUT_AXIS-1)])
     file_name = f"{epoch}_{g_mse}_{g_distance}"
-    #plot_swissroll(result, color, 3).update_layout(title=file_name).write_image(f"./result/{file_name}.png")
+    plot_swissroll(result, color, 3).update_layout(title=file_name).write_image(f"./result/{file_name}.png")
     plot_swissroll(lat_result, color, 2).update_layout(title=file_name).write_image(f"./lat/{file_name}.png")
-
 
 
 # %%
 np_sr = np.array(sr)
-# sr[:, 0] = sr[:, 0] * 4
-# sr[:, 2] = sr[:, 2] * 4
+sr[:, 0] = sr[:, 0] * 4
+sr[:, 2] = sr[:, 2] * 4
 plot_swissroll(sr, color, 3).update_layout(title=f"Original").write_image(f"./result/{0}.png")
 np_sr, input_mean, input_std = z_score(np_sr)#zスコアで標準化
 
@@ -133,10 +120,10 @@ print(f'min:{sr_min}, max:{sr_max}')
 # %%
 model = autoencoder().cuda()
 criterion = custom_loss#nn.MSELoss()
-optimizer = RAdam(
-    model.parameters(), lr=learning_rate, weight_decay=wd)#weight_decay
-
-
+optimizer = RAdam(model.parameters(), lr=learning_rate, weight_decay=wd)#weight_decay
+#optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+#optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
+#scheduler = LambdaLR(optimizer, lr_lambda = lambda epoch: 0.95 ** epoch)
 # %%
 in_tensor = torch.from_numpy(np_sr.astype(np.float32))#np_srをテンソルにしたもの
 print(f"in_tensor:{in_tensor.size()}")
@@ -148,6 +135,9 @@ best_loss=99999
 es_count=0
 frames = []
 for epoch in range(1, num_epochs+1):
+    temp_mse = 0
+    temp_distance = 0
+    temp_loss = 0
     model.train()
     data_iter = DataLoader(in_tensor, batch_size=BATCH_SIZE, shuffle=True)
     for data in data_iter:
@@ -162,23 +152,26 @@ for epoch in range(1, num_epochs+1):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-    if loss.data.item() < best_loss:
+        temp_mse += g_mse.data.item() / (n_samples / BATCH_SIZE)
+        temp_distance += g_distance.data.item() / (n_samples / BATCH_SIZE)
+        temp_loss += loss.data.item() / (n_samples / BATCH_SIZE)
+    if temp_loss < best_loss:
         print('[BEST] ', end='')
         torch.save(model.state_dict(), f'./output/{epoch}.pth')
-        best_loss = loss.data.item()
+        best_loss = temp_loss
         es_count = 0
     es_count += 1
-    print(f'epoch [{epoch}/{num_epochs}], loss:{loss.data.item()},         \n g_mse = {g_mse}, g_distance:{g_distance}'
-        )
+    print(f'epoch [{epoch}/{num_epochs}], loss:{temp_loss}, \n g_mse = {temp_mse}, g_distance:{temp_distance}')
     all_loss.append(
-        [epoch, loss.data.item(), g_mse.data.item(), g_distance.data.item()]
+        [epoch, temp_loss, temp_mse, temp_distance]
         )
-    g_mse_list.append(g_mse.data.item())
-    g_distance_list.append(g_distance.data.item())
-    do_plot(model, epoch, g_mse, g_distance)
-    if es_count == early_stopping:
+    g_mse_list.append(temp_mse)
+    g_distance_list.append(temp_distance)
+    do_plot(model, epoch, temp_mse, temp_distance)
+    if es_count == early_stopping or temp_distance==0.0:
         print('early stopping!')
         break#early_stopping
+    #scheduler.step()
 
 
 # %%
@@ -204,7 +197,7 @@ for n, data in enumerate(DataLoader(in_tensor, batch_size = BATCH_SIZE, shuffle 
 
 #%%
 sampling_num = 1000
-rnd_idx = [random.randint(0, len(result)) for i in range(sampling_num)]
+rnd_idx = [random.randint(0, len(result)-1) for i in range(sampling_num)]
 rnd_result = np.array([result[i] for i in rnd_idx])
 rnd_lat_result = np.array([lat_result[i] for i in rnd_idx])
 rnd_color = np.array([color[i] for i in rnd_idx])

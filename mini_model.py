@@ -51,7 +51,7 @@ class autoencoder(nn.Module):
         for n, m in itertools.product(range(BATCH_SIZE), range(BATCH_SIZE)):
             lat_cord1 = lat_min + lat_repr[n]
             lat_cord2 = lat_min + lat_repr[m]
-            lat_diff_list.append(torch.sqrt(torch.sum((in_cord1-in_cord2)**2)))
+            lat_diff_list.append(torch.sqrt(torch.sum((lat_cord1-lat_cord2)**2)))
         lat_diff_sum = torch.stack(lat_diff_list, dim=0)
 
         #----------------------------------------

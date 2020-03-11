@@ -13,92 +13,72 @@ import plotly.graph_objects as go
 import chart_studio.plotly as py
 import plotly
 from bayes_opt import BayesianOptimization
+from radam import *
 get_ipython().run_line_magic('load_ext', 'autoreload')
 get_ipython().run_line_magic('autoreload', '2')
 
 from maguro import *
 from model import *
 #次元落とさずに3次元でできないか(1次元にせずチャンネルを保持)
-
+#{'target': -1.0076094367541373, 'params': {'learning_rate': 0.0008826217021716755, 'wd': 0.0005360212814076004}}
+#|  19       |  nan      |  0.000712 |  0.000520 |
 do_this_bayes = {
-    'learning_rate' : (0.00001, 0.0001),
-    'p1' : (0, 1),
-    'p2' : (0, 1),
-    'wd' : (0.000001, 0.0001)
+    'learning_rate' : (1, 1000000),
+    'wd' : (1, 1000000)
 }
 
 def custom_loss(output, target, in_diff_sum, lat_diff_sum):
     global g_distance, g_mse
-    g_mse = torch.mean((output - target)**2)
-    g_distance = (lat_diff_sum / in_diff_sum).std(dim=0)#比の分散
-    loss = g_mse#(g_mse+g_distance)+(1+(torch.abs(g_mse-g_distance))**2)
+    KL_divergence = nn.KLDivLoss(reduction="sum")
+    SM = nn.Softmax(dim=0)
+    g_mse = torch.mean(torch.sqrt((output - target)**2))
+    g_distance = Variable(KL_divergence(SM(in_diff_sum).log(), SM(lat_diff_sum)), requires_grad = True).cuda()
+    loss = g_mse+g_distance
     return loss
+
 
 def z_score(x, axis = None):
     xmean = x.mean(axis=axis, keepdims=True)
     xstd = np.std(x, axis=axis, keepdims=True)
-    zscore = (x-xmean)/xstd
+    zscore = (x-xmean) / xstd
     return zscore, xmean, xstd
 
-def search_in_train(learning_rate, p1, p2, wd):
+def search_in_train(learning_rate, wd):
     model = autoencoder().cuda()
-    criterion = custom_loss#nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=wd)#weight_decay
-
+    criterion = custom_loss
+    optimizer = RAdam(model.parameters(), lr=1/learning_rate, weight_decay=1/wd)#weight_decay
     in_tensor = torch.from_numpy(np_sr.astype(np.float32))
-
-    all_loss=[]
-    best_loss=99999
-    es_count=0
     for epoch in range(1, num_epochs+1):
-        for data in DataLoader(in_tensor, batch_size=BATCH_SIZE, shuffle=True):
+        temp_loss = 0
+        model.train()
+        data_iter = DataLoader(in_tensor, batch_size=BATCH_SIZE, shuffle=True)
+        for data in data_iter:
             batch = data
-            batch = batch.reshape(batch.size(0)*3)#考える必要あり
+            batch = batch.reshape(batch.size(0)*3)
             batch = Variable(batch).cuda()
             # ===================forward=====================
             output, in_diff_sum, lat_diff_sum, _ = model(batch)
             loss = criterion(output, batch, in_diff_sum, lat_diff_sum)
-            #print(loss)
             # ===================backward====================
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-        if loss.data.item() < best_loss:
-            # print('[BEST] ', end='')
-            # torch.save(model.state_dict(), f'./output/{epoch}.pth')
-            best_loss = loss.data.item()
-            es_count=0
-        es_count += 1
-        all_loss.append(
-            [epoch, loss.data.item(), g_mse.data.item(), g_distance.data.item()]
-            )
-        if es_count == early_stopping:
-            # print('early stopping!')
-            break#early_stopping
-    return -(loss.data.item())
+            temp_loss += loss.data.item() / (n_samples / BATCH_SIZE)
+    return -(temp_loss)
 
-n_samples = 5096#32768
-noise = 0#0.05
+n_samples = 2**10#32768
+noise = 0.05
 sr, color = make_swiss_roll(n_samples, noise)
 np_sr = np.array(sr)
 np_sr, input_mean, input_std = z_score(np_sr)
 
-num_epochs = 200
-early_stopping=10
+num_epochs = 20
+early_stopping = 5
 g_distance = torch.Tensor()
 g_mse = torch.Tensor()
 
-optimizer = BayesianOptimization(f=search_in_train, pbounds=do_this_bayes)
-optimizer.maximize(init_points=5, n_iter=5000)
+bayeser = BayesianOptimization(f=search_in_train, pbounds=do_this_bayes)
+bayeser.maximize(init_points=200, n_iter=300)
 
 #%%
-print(optimizer.res['target'])
-max_idx=np.argmax([x['target'] for x in optimizer.res])
-print(optimizer.res[max_idx])
-#targets=[for x in optimizer.res]
-#print(target)
-#{'target': -0.3682848811149597,
-#  'params': {'learning_rate': 9.884352878854778e-05,
-#  'p1': 0.9293929811106598,
-#  'p2': 0.17363040237602712,
-#  'wd': 5.358144068814221e-05}}
+print(bayeser.max)
