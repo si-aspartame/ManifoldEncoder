@@ -11,43 +11,27 @@ B = int(BATCH_SIZE*INPUT_AXIS)
 C = int(BATCH_SIZE*INPUT_AXIS)
 D = int(BATCH_SIZE*(INPUT_AXIS-1))#int(C/4)batch_size*(axis-1)
 
-class Swish(nn.Module):
-    def forward(self, input_tensor):
-        return input_tensor * torch.sigmoid(input_tensor)
-
-class arTanh(nn.Module):
-    def forward(self, input_tensor):
-        return 0.5*torch.log((1+input_tensor)/(1-input_tensor))
-
-class Tangent(nn.Module):
-    def forward(self, input_tensor):
-        return torch.tan(input_tensor)
-
-class ARC_Tangent(nn.Module):
-    def forward(self, input_tensor):
-        return torch.atan(input_tensor)
-
 class autoencoder(nn.Module):
     def __init__(self):
         super(autoencoder, self).__init__()
         self.KL_divergence = nn.KLDivLoss(reduction="sum")
         self.encoder = nn.Sequential(
             nn.Linear(A, B),#96, 96
-            nn.Tanh(),
+            nn.LeakyReLU(),
             nn.Linear(B, C), #96, 96
-            nn.Tanhshrink(),
+            nn.LeakyReLU(),
             nn.Linear(C, C), #96, 96
-            nn.Tanh(),
+            nn.LeakyReLU(),
             nn.Linear(C, D),
             nn.Tanh())#96,64
         self.decoder = nn.Sequential(
             nn.Linear(D, C),#64, 96
-            nn.Tanh(),
-            nn.Linear(C, C),
-            nn.Tanhshrink(),
-            nn.Linear(C, B),
-            nn.Tanh(),
-            nn.Linear(B, A),
+            nn.LeakyReLU(),
+            nn.Linear(C, C),#64, 96
+            nn.LeakyReLU(),
+            nn.Linear(C, B),#64, 96
+            nn.LeakyReLU(),
+            nn.Linear(C, B),#64, 96
             nn.Tanh())
     
     def forward(self, x):

@@ -8,7 +8,7 @@ from torch import nn
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from sklearn.datasets import make_swiss_roll
+from sklearn.datasets import make_s_curve
 import plotly.graph_objects as go
 import chart_studio.plotly as py
 import plotly

@@ -12,7 +12,7 @@ from torch.optim.lr_scheduler import LambdaLR
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from sklearn.datasets import make_swiss_roll
+from sklearn.datasets import make_s_curve, make_swiss_roll
 import plotly.graph_objects as go
 import chart_studio.plotly as py
 import plotly
@@ -26,23 +26,30 @@ from model import *
 #乱数でmseとdistanceを入れ替える
 #MSEが下がらなくなったときにエンコーダを更新する（MSE→distanceの順で繰り返す）
 #S字でやってみる
-
+#アンサンブル
+#縦横でネットワークを分ける
+#ユークリッドで学習してデコーダの調整でなんとかする
 # %%
 #learning parameter
-num_epochs = 10
-learning_rate = 0.001
+#問題は活性化関数にある
+mode = 'roll'
+num_epochs = 1
+learning_rate = 0.0001
 early_stopping = 50
 g_distance = torch.Tensor()
 g_mse = torch.Tensor()
 g_distance_list = []
 g_mse_list = []
-wd = 0.01
+wd = 0.001
 
 # %%
 #swissroll parameter
-n_samples = 2**10
+n_samples = 2**14
 noise = 0.05#0.05
-sr, color = make_swiss_roll(n_samples, noise)#sr=swissroll
+if mode == 'roll':
+    sr, color = make_s_curve(n_samples, noise)
+elif mode == 'roll':
+    sr, color = make_swiss_roll(n_samples, noise)
 #どちらも出来ないことは許すが、どっちかが出来ることは罰する
 def custom_loss(output, target, in_diff_sum, lat_diff_sum):
     global g_distance, g_mse
@@ -51,8 +58,8 @@ def custom_loss(output, target, in_diff_sum, lat_diff_sum):
     # print(f'output:{output}')
     # print(f'target:{target}')
     g_mse = torch.mean(torch.sqrt((output - target)**2))
-
-    g_distance = Variable(KL_divergence(SM(in_diff_sum).log(), SM(lat_diff_sum)), requires_grad = True)
+    g_distance = Variable(torch.mean(torch.sqrt((in_diff_sum - lat_diff_sum)**2)), requires_grad = True)
+    #g_distance = Variable(KL_divergence(SM(in_diff_sum).log(), SM(lat_diff_sum))*5, requires_grad = True)
     #loss = (g_mse+g_distance)+torch.abs(g_mse-g_distance)
     #loss = (g_mse+g_distance)*(1+torch.abs(g_mse-g_distance))
     loss = g_mse+g_distance
@@ -104,8 +111,8 @@ def do_plot(model, epoch, g_mse, g_distance):
 
 # %%
 np_sr = np.array(sr)
-sr[:, 0] = sr[:, 0] * 4
-sr[:, 2] = sr[:, 2] * 4
+# sr[:, 0] = sr[:, 0] * 4
+# sr[:, 2] = sr[:, 2] * 4
 plot_swissroll(sr, color, 3).update_layout(title=f"Original").write_image(f"./result/{0}.png")
 np_sr, input_mean, input_std = z_score(np_sr)#zスコアで標準化
 
@@ -123,7 +130,7 @@ criterion = custom_loss#nn.MSELoss()
 optimizer = RAdam(model.parameters(), lr=learning_rate, weight_decay=wd)#weight_decay
 #optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 #optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
-#scheduler = LambdaLR(optimizer, lr_lambda = lambda epoch: 0.95 ** epoch)
+scheduler = LambdaLR(optimizer, lr_lambda = lambda epoch: 0.95 ** epoch)
 # %%
 in_tensor = torch.from_numpy(np_sr.astype(np.float32))#np_srをテンソルにしたもの
 print(f"in_tensor:{in_tensor.size()}")
@@ -171,7 +178,8 @@ for epoch in range(1, num_epochs+1):
     if es_count == early_stopping or temp_distance==0.0:
         print('early stopping!')
         break#early_stopping
-    #scheduler.step()
+
+    scheduler.step()
 
 
 # %%
