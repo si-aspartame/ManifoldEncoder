@@ -1,5 +1,6 @@
 # %%
 from IPython import get_ipython
+from IPython import get_ipython
 from IPython.display import Image
 import os
 import gc
@@ -29,22 +30,25 @@ from model import *
 #アンサンブル
 #縦横でネットワークを分ける
 #ユークリッドで学習してデコーダの調整でなんとかする
+
+
 # %%
 #learning parameter
 #問題は活性化関数にある
 mode = 'roll'
-num_epochs = 20
-learning_rate = 0.01#0.01
+num_epochs = 100
+learning_rate = 0.01
 early_stopping = 50
 g_distance = torch.Tensor()
 g_mse = torch.Tensor()
 g_distance_list = []
 g_mse_list = []
-wd = 0.01#0.01
+wd = 0.01
+
 
 # %%
 #swissroll parameter
-n_samples = 2**13
+n_samples = 2**14
 noise = 0.05#0.05
 if mode == 'curve':
     sr, color = make_s_curve(n_samples, noise)
@@ -56,14 +60,13 @@ def custom_loss(output, target, in_diff_sum, lat_diff_sum):
     KL_divergence = nn.KLDivLoss().cuda()#reduction="sum"
     SM = nn.Softmax(dim=0).cuda()
     MSE = nn.MSELoss(size_average=True).cuda()
-    #MSE2 = nn.MSELoss(size_average=True).cuda()
     #g_mse = torch.mean(torch.sqrt((output - target)**2))
     g_mse = MSE(output, target)
-    #g_distance = Variable(MSE2(lat_diff_sum, in_diff_sum), requires_grad = True)
-    g_distance = Variable(KL_divergence(SM(in_diff_sum).log(), SM(lat_diff_sum)), requires_grad = True)
+    g_distance = Variable(MSE(lat_diff_sum, in_diff_sum), requires_grad = True)
+    #g_distance = Variable(KL_divergence(SM(in_diff_sum).log(), SM(lat_diff_sum)), requires_grad = True)
     #loss = (g_mse+g_distance)+torch.abs(g_mse-g_distance)
-    loss = (g_mse+g_distance)*(1+torch.abs(g_mse-g_distance))
-    #loss = g_mse+g_distance
+    #loss = (g_mse+g_distance)*(1+torch.abs(g_mse-g_distance))
+    loss = g_mse+g_distance
     return loss
 
 
@@ -132,6 +135,8 @@ optimizer = RAdam(model.parameters(), lr=learning_rate, weight_decay=wd)#weight_
 #optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 #optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, weight_decay=wd)
 scheduler = LambdaLR(optimizer, lr_lambda = lambda epoch: 0.95 ** epoch)
+
+
 # %%
 in_tensor = torch.from_numpy(np_sr.astype(np.float32))#np_srをテンソルにしたもの
 print(f"in_tensor:{in_tensor.size()}")
@@ -204,12 +209,14 @@ for n, data in enumerate(DataLoader(in_tensor, batch_size = BATCH_SIZE, shuffle 
     result=np.vstack([result, output.data.cpu().numpy().reshape(BATCH_SIZE, INPUT_AXIS)])
     lat_result=np.vstack([lat_result, lat_repr.data.cpu().numpy().reshape(BATCH_SIZE, INPUT_AXIS-1)])
 
-#%%
+
+# %%
 sampling_num = 1000
 rnd_idx = [random.randint(0, len(result)-1) for i in range(sampling_num)]
 rnd_result = np.array([result[i] for i in rnd_idx])
 rnd_lat_result = np.array([lat_result[i] for i in rnd_idx])
 rnd_color = np.array([color[i] for i in rnd_idx])
+
 
 # %%
 plotly.offline.iplot(plot_swissroll(rnd_result, rnd_color, 3), filename='decoded swiss roll')
@@ -229,3 +236,5 @@ MA_g_distance_list=np.convolve(g_distance_list, b, mode='same')#移動平均
 loss_fig.add_trace(go.Scatter(x = list(range(0, len(all_loss))), y = MA_g_mse_list, name='mse'))
 loss_fig.add_trace(go.Scatter(x = list(range(0, len(all_loss))), y = MA_g_distance_list, name='distance'))
 plotly.offline.iplot(loss_fig, filename='mse and distance progress')
+
+

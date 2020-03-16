@@ -14,19 +14,19 @@ D = int(BATCH_SIZE*(INPUT_AXIS-1))#int(C/4)batch_size*(axis-1)
 class autoencoder(nn.Module):
     def __init__(self):
         super(autoencoder, self).__init__()
-        self.KL_divergence = nn.KLDivLoss(reduction="sum")
         self.encoder = nn.Sequential(
             nn.Linear(A, B),#96, 96
-            nn.GELU(),
-            nn.Linear(B, C), #96, 96
-            nn.GELU(),
+            nn.Tanh(),
+            nn.Linear(B, C),#96, 96
+            nn.Tanh(),
             nn.Linear(C, C),
-            nn.Linear(C, D))#96,64
+            nn.Linear(C, D),
+            nn.Tanhshrink())#96,64
         self.decoder = nn.Sequential(
             nn.Linear(D, C),#64, 96
-            nn.GELU(),
+            nn.Tanh(),
             nn.Linear(C, B),#64, 96
-            nn.GELU(),
+            nn.Tanh(),
             nn.Linear(B, B),
             nn.Linear(B, A),#64, 96
             nn.Tanh())
