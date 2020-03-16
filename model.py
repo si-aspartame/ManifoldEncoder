@@ -17,21 +17,18 @@ class autoencoder(nn.Module):
         self.KL_divergence = nn.KLDivLoss(reduction="sum")
         self.encoder = nn.Sequential(
             nn.Linear(A, B),#96, 96
-            nn.LeakyReLU(),
+            nn.GELU(),
             nn.Linear(B, C), #96, 96
-            nn.LeakyReLU(),
-            nn.Linear(C, C), #96, 96
-            nn.LeakyReLU(),
-            nn.Linear(C, D),
-            nn.Tanh())#96,64
+            nn.GELU(),
+            nn.Linear(C, C),
+            nn.Linear(C, D))#96,64
         self.decoder = nn.Sequential(
             nn.Linear(D, C),#64, 96
-            nn.LeakyReLU(),
-            nn.Linear(C, C),#64, 96
-            nn.LeakyReLU(),
+            nn.GELU(),
             nn.Linear(C, B),#64, 96
-            nn.LeakyReLU(),
-            nn.Linear(C, B),#64, 96
+            nn.GELU(),
+            nn.Linear(B, B),
+            nn.Linear(B, A),#64, 96
             nn.Tanh())
     
     def forward(self, x):

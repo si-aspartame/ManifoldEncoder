@@ -33,33 +33,33 @@ from model import *
 #learning parameter
 #問題は活性化関数にある
 mode = 'roll'
-num_epochs = 1
-learning_rate = 0.0001
+num_epochs = 20
+learning_rate = 0.01
 early_stopping = 50
 g_distance = torch.Tensor()
 g_mse = torch.Tensor()
 g_distance_list = []
 g_mse_list = []
-wd = 0.001
+wd = 0.01
 
 # %%
 #swissroll parameter
-n_samples = 2**14
+n_samples = 2**10
 noise = 0.05#0.05
-if mode == 'roll':
+if mode == 'curve':
     sr, color = make_s_curve(n_samples, noise)
 elif mode == 'roll':
     sr, color = make_swiss_roll(n_samples, noise)
 #どちらも出来ないことは許すが、どっちかが出来ることは罰する
 def custom_loss(output, target, in_diff_sum, lat_diff_sum):
     global g_distance, g_mse
-    KL_divergence = nn.KLDivLoss(reduction="sum").cuda()
+    KL_divergence = nn.KLDivLoss().cuda()#reduction="sum"
     SM = nn.Softmax(dim=0).cuda()
-    # print(f'output:{output}')
-    # print(f'target:{target}')
-    g_mse = torch.mean(torch.sqrt((output - target)**2))
-    g_distance = Variable(torch.mean(torch.sqrt((in_diff_sum - lat_diff_sum)**2)), requires_grad = True)
-    #g_distance = Variable(KL_divergence(SM(in_diff_sum).log(), SM(lat_diff_sum))*5, requires_grad = True)
+    MSE = nn.MSELoss(size_average=True).cuda()
+    #g_mse = torch.mean(torch.sqrt((output - target)**2))
+    g_mse = MSE(output, target)
+    g_distance = Variable(MSE(lat_diff_sum, in_diff_sum), requires_grad = True)
+    #g_distance = Variable(KL_divergence(SM(in_diff_sum).log(), SM(lat_diff_sum)), requires_grad = True)
     #loss = (g_mse+g_distance)+torch.abs(g_mse-g_distance)
     #loss = (g_mse+g_distance)*(1+torch.abs(g_mse-g_distance))
     loss = g_mse+g_distance
@@ -129,7 +129,7 @@ model = autoencoder().cuda()
 criterion = custom_loss#nn.MSELoss()
 optimizer = RAdam(model.parameters(), lr=learning_rate, weight_decay=wd)#weight_decay
 #optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-#optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
+#optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, weight_decay=wd)
 scheduler = LambdaLR(optimizer, lr_lambda = lambda epoch: 0.95 ** epoch)
 # %%
 in_tensor = torch.from_numpy(np_sr.astype(np.float32))#np_srをテンソルにしたもの
