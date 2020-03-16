@@ -33,7 +33,7 @@ from model import *
 #learning parameter
 #問題は活性化関数にある
 mode = 'roll'
-num_epochs = 20
+num_epochs = 1
 learning_rate = 0.01#0.01
 early_stopping = 50
 g_distance = torch.Tensor()
