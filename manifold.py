@@ -44,7 +44,7 @@ wd = 0.01#0.01
 
 # %%
 #swissroll parameter
-n_samples = 2**13
+n_samples = 2**15
 noise = 0.05#0.05
 if mode == 'curve':
     sr, color = make_s_curve(n_samples, noise)

@@ -4,7 +4,7 @@ import itertools
 import numpy as np
 from torch.autograd import Variable
 from torch import tan, atan
-BATCH_SIZE = 8
+BATCH_SIZE = 4
 INPUT_AXIS = 3
 A = int(BATCH_SIZE*INPUT_AXIS)#1536
 B = int(BATCH_SIZE*INPUT_AXIS)
@@ -21,7 +21,7 @@ class autoencoder(nn.Module):
             nn.Tanh(),
             nn.Linear(C, C),
             nn.Linear(C, D),
-            nn.Tanhshrink())#96,64
+            nn.Tanhshrink())#96,64 
         self.decoder = nn.Sequential(
             nn.Linear(D, C),#64, 96
             nn.Tanh(),
@@ -43,14 +43,14 @@ class autoencoder(nn.Module):
             in_cord1 = in_min + in_data[n]
             in_cord2 = in_min + in_data[m]
             in_diff_list.append(torch.sqrt(torch.sum((in_cord1-in_cord2)**2)))
-        in_diff_sum = torch.stack(in_diff_list, dim=0).cuda()
+        in_diff_sum = Variable(torch.stack(in_diff_list, dim=0), requires_grad = True).cuda()
         
         lat_diff_list = []
         for n, m in itertools.product(range(BATCH_SIZE), range(BATCH_SIZE)):
             lat_cord1 = lat_min + lat_repr[n]
             lat_cord2 = lat_min + lat_repr[m]
             lat_diff_list.append(torch.sqrt(torch.sum((lat_cord1-lat_cord2)**2)))
-        lat_diff_sum = torch.stack(lat_diff_list, dim=0).cuda()
+        lat_diff_sum = Variable(torch.stack(lat_diff_list, dim=0), requires_grad = True).cuda()
 
         #----------------------------------------
         output = self.decoder(y).cuda()
