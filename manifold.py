@@ -44,7 +44,7 @@ wd = 0.01#0.01
 
 # %%
 #swissroll parameter
-n_samples = 2**15
+n_samples = 2**13
 noise = 0.05#0.05
 if mode == 'curve':
     sr, color = make_s_curve(n_samples, noise)
@@ -62,7 +62,8 @@ def custom_loss(output, target, in_diff_sum, lat_diff_sum):
     #g_distance = Variable(MSE2(lat_diff_sum, in_diff_sum), requires_grad = True)
     g_distance = Variable(KL_divergence(SM(in_diff_sum).log(), SM(lat_diff_sum)), requires_grad = True)
     #loss = (g_mse+g_distance)+torch.abs(g_mse-g_distance)
-    loss = (g_mse+g_distance)*(1+torch.abs(g_mse-g_distance))
+    #loss = (g_mse+g_distance)*(1+torch.abs(g_mse-g_distance))
+    loss = g_mse*((1+g_distance)**2)
     #loss = g_mse+g_distance
     return loss
 
@@ -112,8 +113,8 @@ def do_plot(model, epoch, g_mse, g_distance):
 
 # %%
 np_sr = np.array(sr)
-# sr[:, 0] = sr[:, 0] * 4
-# sr[:, 2] = sr[:, 2] * 4
+sr[:, 0] = sr[:, 0] * 4
+sr[:, 2] = sr[:, 2] * 4
 plot_swissroll(sr, color, 3).update_layout(title=f"Original").write_image(f"./result/{0}.png")
 np_sr, input_mean, input_std = z_score(np_sr)#zスコアで標準化
 

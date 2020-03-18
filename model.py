@@ -4,7 +4,7 @@ import itertools
 import numpy as np
 from torch.autograd import Variable
 from torch import tan, atan
-BATCH_SIZE = 4
+BATCH_SIZE = 3
 INPUT_AXIS = 3
 A = int(BATCH_SIZE*INPUT_AXIS)#1536
 B = int(BATCH_SIZE*INPUT_AXIS)
