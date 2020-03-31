@@ -22,6 +22,7 @@ get_ipython().run_line_magic('load_ext', 'autoreload')
 get_ipython().run_line_magic('autoreload', '2')
 from maguro import *
 from model import *
+#ランダムになるのは、途中で消えている特徴を変換しようとするから
 #入力の並びを分類するネットワークを別に作る
 #乱数でmseとdistanceを入れ替える
 #MSEが下がらなくなったときにエンコーダを更新する（MSE→distanceの順で繰り返す）
@@ -29,23 +30,25 @@ from model import *
 #アンサンブル
 #縦横でネットワークを分ける
 #ユークリッドで学習してデコーダの調整でなんとかする
+
 # %%
 #learning parameter
 #問題は活性化関数にある
 mode = 'roll'
-num_epochs = 1
+num_epochs = 20
 learning_rate = 0.01#0.01
 early_stopping = 50
 g_distance = torch.Tensor()
 g_mse = torch.Tensor()
 g_distance_list = []
 g_mse_list = []
-wd = 0.01#0.01
-
+wd = 0#0.01
+#Softmaxでスケールの情報が消えるから正則化が効く
+#四角に発散するやつはスケールぐちゃぐちゃ
 # %%
 #swissroll parameter
-n_samples = 2**13
-noise = 0.05#0.05
+n_samples = 3**9
+noise = 0#0.05
 if mode == 'curve':
     sr, color = make_s_curve(n_samples, noise)
 elif mode == 'roll':
@@ -55,15 +58,17 @@ def custom_loss(output, target, in_diff_sum, lat_diff_sum):
     global g_distance, g_mse
     KL_divergence = nn.KLDivLoss().cuda()#reduction="sum"
     SM = nn.Softmax(dim=0).cuda()
-    MSE = nn.MSELoss(size_average=True).cuda()
-    #MSE2 = nn.MSELoss(size_average=True).cuda()
+    MSE = nn.MSELoss(reduction='mean').cuda()
+    MSE2 = nn.MSELoss(reduction='mean').cuda()
     #g_mse = torch.mean(torch.sqrt((output - target)**2))
     g_mse = MSE(output, target)
     #g_distance = Variable(MSE2(lat_diff_sum, in_diff_sum), requires_grad = True)
     g_distance = Variable(KL_divergence(SM(in_diff_sum).log(), SM(lat_diff_sum)), requires_grad = True)
+    #g_distance = Variable(KL_divergence(in_diff_sum.log(), lat_diff_sum), requires_grad = True)
     #loss = (g_mse+g_distance)+torch.abs(g_mse-g_distance)
     #loss = (g_mse+g_distance)*(1+torch.abs(g_mse-g_distance))
-    loss = g_mse*((1+g_distance)**2)
+    #loss = g_mse*((1+(g_distance))**2)
+    loss = g_mse+(20*g_distance)
     #loss = g_mse+g_distance
     return loss
 
@@ -96,7 +101,6 @@ def do_plot(model, epoch, g_mse, g_distance):
     result=np.empty((0,3))
     lat_result=np.empty((0,2))
     model.eval()
-
     for n, data in enumerate(DataLoader(in_tensor, batch_size=BATCH_SIZE, shuffle=False)):#シャッフルしない
         #print(f'TEST:{n}')
         batch = data
@@ -112,9 +116,9 @@ def do_plot(model, epoch, g_mse, g_distance):
 
 
 # %%
+# sr[:, 0] = sr[:, 0] * 4
+# sr[:, 2] = sr[:, 2] * 4
 np_sr = np.array(sr)
-sr[:, 0] = sr[:, 0] * 4
-sr[:, 2] = sr[:, 2] * 4
 plot_swissroll(sr, color, 3).update_layout(title=f"Original").write_image(f"./result/{0}.png")
 np_sr, input_mean, input_std = z_score(np_sr)#zスコアで標準化
 
@@ -130,9 +134,9 @@ print(f'min:{sr_min}, max:{sr_max}')
 model = autoencoder().cuda()
 criterion = custom_loss#nn.MSELoss()
 optimizer = RAdam(model.parameters(), lr=learning_rate, weight_decay=wd)#weight_decay
-#optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+#optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=wd)
 #optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, weight_decay=wd)
-scheduler = LambdaLR(optimizer, lr_lambda = lambda epoch: 0.95 ** epoch)
+#scheduler = LambdaLR(optimizer, lr_lambda = lambda epoch: 0.95 ** epoch)
 # %%
 in_tensor = torch.from_numpy(np_sr.astype(np.float32))#np_srをテンソルにしたもの
 print(f"in_tensor:{in_tensor.size()}")
@@ -181,7 +185,7 @@ for epoch in range(1, num_epochs+1):
         print('early stopping!')
         break#early_stopping
 
-    scheduler.step()
+    #scheduler.step()
 
 
 # %%

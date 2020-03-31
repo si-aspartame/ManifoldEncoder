@@ -16,20 +16,20 @@ class autoencoder(nn.Module):
         super(autoencoder, self).__init__()
         self.encoder = nn.Sequential(
             nn.Linear(A, B),#96, 96
-            nn.Tanh(),
+            nn.SELU(),
             nn.Linear(B, C),#96, 96
-            nn.Tanh(),
+            nn.SELU(),
             nn.Linear(C, C),
             nn.Linear(C, D),
-            nn.Tanhshrink())#96,64 
+            nn.Tanh())#96,64 
         self.decoder = nn.Sequential(
             nn.Linear(D, C),#64, 96
-            nn.Tanh(),
+            nn.SELU(),
             nn.Linear(C, B),#64, 96
-            nn.Tanh(),
-            nn.Linear(B, B),
+            nn.SELU(),
+            nn.Linear(B, B),#64, 96
             nn.Linear(B, A),#64, 96
-            nn.Tanh())
+            nn.Tanhshrink())
     
     def forward(self, x):
         y = self.encoder(x).cuda()
@@ -43,6 +43,7 @@ class autoencoder(nn.Module):
             in_cord1 = in_min + in_data[n]
             in_cord2 = in_min + in_data[m]
             in_diff_list.append(torch.sqrt(torch.sum((in_cord1-in_cord2)**2)))
+            #in_diff_list.append(torch.sum(in_cord1-in_cord2))
         in_diff_sum = Variable(torch.stack(in_diff_list, dim=0), requires_grad = True).cuda()
         
         lat_diff_list = []
@@ -50,6 +51,7 @@ class autoencoder(nn.Module):
             lat_cord1 = lat_min + lat_repr[n]
             lat_cord2 = lat_min + lat_repr[m]
             lat_diff_list.append(torch.sqrt(torch.sum((lat_cord1-lat_cord2)**2)))
+            #lat_diff_list.append(torch.sum(lat_cord1-lat_cord2))
         lat_diff_sum = Variable(torch.stack(lat_diff_list, dim=0), requires_grad = True).cuda()
 
         #----------------------------------------
