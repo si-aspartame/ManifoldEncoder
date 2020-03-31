@@ -68,7 +68,7 @@ def custom_loss(output, target, in_diff_sum, lat_diff_sum):
     #loss = (g_mse+g_distance)+torch.abs(g_mse-g_distance)
     #loss = (g_mse+g_distance)*(1+torch.abs(g_mse-g_distance))
     #loss = g_mse*((1+(g_distance))**2)
-    loss = g_mse+(20*g_distance)
+    loss = g_mse+(10*g_distance)
     #loss = g_mse+g_distance
     return loss
 
@@ -116,8 +116,8 @@ def do_plot(model, epoch, g_mse, g_distance):
 
 
 # %%
-# sr[:, 0] = sr[:, 0] * 4
-# sr[:, 2] = sr[:, 2] * 4
+sr[:, 0] = sr[:, 0] * 4
+sr[:, 2] = sr[:, 2] * 4
 np_sr = np.array(sr)
 plot_swissroll(sr, color, 3).update_layout(title=f"Original").write_image(f"./result/{0}.png")
 np_sr, input_mean, input_std = z_score(np_sr)#zスコアで標準化
