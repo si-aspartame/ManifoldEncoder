@@ -22,7 +22,6 @@ from maguro import *
 from model import *
 get_ipython().run_line_magic('load_ext', 'autoreload')
 get_ipython().run_line_magic('autoreload', '2')
-
 #ランダムになるのは、途中で消えている特徴を変換しようとするから
 #入力の並びを分類するネットワークを別に作る
 #乱数でmseとdistanceを入れ替える
@@ -32,20 +31,23 @@ get_ipython().run_line_magic('autoreload', '2')
 #縦横でネットワークを分ける
 #ユークリッドで学習してデコーダの調整でなんとかする
 
+
 # %%
 #learning parameter
 #問題は活性化関数にある
 mode = 'roll'
-num_epochs = 1
+num_epochs = 20
 learning_rate = 0.001#0.01
 early_stopping = 50
 g_distance = torch.Tensor()
 g_mse = torch.Tensor()
 g_distance_list = []
 g_mse_list = []
-wd = 0.00000001#0.01
+wd = 0.000000001#0.0000001
 #Softmaxでスケールの情報が消えるから正則化が効く
 #四角に発散するやつはスケールぐちゃぐちゃ
+
+
 # %%
 #swissroll parameter
 n_samples = 3**10
@@ -140,6 +142,8 @@ criterion = custom_loss#nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=wd)
 #optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, weight_decay=wd)
 #scheduler = LambdaLR(optimizer, lr_lambda = lambda epoch: 0.95 ** epoch)
+
+
 # %%
 in_tensor = torch.from_numpy(np_sr.astype(np.float32))#np_srをテンソルにしたもの
 print(f"in_tensor:{in_tensor.size()}")
@@ -212,12 +216,14 @@ for n, data in enumerate(DataLoader(in_tensor, batch_size = BATCH_SIZE, shuffle 
     result=np.vstack([result, output.data.cpu().numpy().reshape(BATCH_SIZE, INPUT_AXIS)])
     lat_result=np.vstack([lat_result, lat_repr.data.cpu().numpy().reshape(BATCH_SIZE, INPUT_AXIS-1)])
 
-#%%
+
+# %%
 sampling_num = 1000
 rnd_idx = [random.randint(0, len(result)-1) for i in range(sampling_num)]
 rnd_result = np.array([result[i] for i in rnd_idx])
 rnd_lat_result = np.array([lat_result[i] for i in rnd_idx])
 rnd_color = np.array([color[i] for i in rnd_idx])
+
 
 # %%
 plotly.offline.iplot(plot_swissroll(rnd_result, rnd_color, 3), filename='decoded swiss roll')
@@ -237,3 +243,5 @@ MA_g_distance_list=np.convolve(g_distance_list, b, mode='same')#移動平均
 loss_fig.add_trace(go.Scatter(x = list(range(0, len(all_loss))), y = MA_g_mse_list, name='mse'))
 loss_fig.add_trace(go.Scatter(x = list(range(0, len(all_loss))), y = MA_g_distance_list, name='distance'))
 plotly.offline.iplot(loss_fig, filename='mse and distance progress')
+
+
