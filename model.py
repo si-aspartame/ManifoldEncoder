@@ -4,7 +4,7 @@ import itertools
 import numpy as np
 from torch.autograd import Variable
 from torch import tan, atan
-BATCH_SIZE = 3
+BATCH_SIZE = 4
 INPUT_AXIS = 3
 A = int(BATCH_SIZE*INPUT_AXIS)#1536
 B = int(BATCH_SIZE*INPUT_AXIS)
@@ -15,7 +15,7 @@ class autoencoder(nn.Module):
         super(autoencoder, self).__init__()
         self.encoder = nn.Sequential(
             nn.Linear(A, B),
-            nn.Linear(B, C),
+            # nn.Linear(B, C),
             # nn.Linear(C, C),
             nn.Linear(C, D),
             nn.Tanh(),
@@ -23,7 +23,7 @@ class autoencoder(nn.Module):
         self.decoder = nn.Sequential(
             nn.Linear(D, C),
             # nn.Linear(C, C),
-            nn.Linear(C, B),
+            # nn.Linear(C, B),
             nn.Linear(B, A),
             nn.Tanhshrink()
             )
