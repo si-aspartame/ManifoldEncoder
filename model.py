@@ -10,26 +10,23 @@ A = int(BATCH_SIZE*INPUT_AXIS)#1536
 B = int(BATCH_SIZE*INPUT_AXIS)
 C = int(BATCH_SIZE*INPUT_AXIS)
 D = int(BATCH_SIZE*(INPUT_AXIS-1))#int(C/4)batch_size*(axis-1)
-
 class autoencoder(nn.Module):
     def __init__(self):
         super(autoencoder, self).__init__()
         self.encoder = nn.Sequential(
-            nn.Linear(A, B),#96, 96
-            nn.SELU(),
-            nn.Linear(B, C),#96, 96
-            nn.SELU(),
-            nn.Linear(C, C),
+            nn.Linear(A, B),
+            nn.Linear(B, C),
+            # nn.Linear(C, C),
             nn.Linear(C, D),
-            nn.Tanh())#96,64 
+            nn.Tanh(),
+            )
         self.decoder = nn.Sequential(
-            nn.Linear(D, C),#64, 96
-            nn.SELU(),
-            nn.Linear(C, B),#64, 96
-            nn.SELU(),
-            nn.Linear(B, B),#64, 96
-            nn.Linear(B, A),#64, 96
-            nn.Tanhshrink())
+            nn.Linear(D, C),
+            # nn.Linear(C, C),
+            nn.Linear(C, B),
+            nn.Linear(B, A),
+            nn.Tanhshrink()
+            )
     
     def forward(self, x):
         y = self.encoder(x).cuda()
@@ -39,21 +36,29 @@ class autoencoder(nn.Module):
         lat_min  = torch.min(lat_repr).cuda()
         #---------------------各点からの距離
         in_diff_list = []#各点同士の距離の組み合わせ
-        for n, m in itertools.product(range(BATCH_SIZE), range(BATCH_SIZE)):
-            in_cord1 = in_min + in_data[n]
-            in_cord2 = in_min + in_data[m]
+        for n in itertools.combinations(range(BATCH_SIZE), 2):#同じもの同士を比較しない
+            in_cord1 = in_min + in_data[n[0]]
+            in_cord2 = in_min + in_data[n[1]]
+            #print(n, '|', in_cord1, '|', in_cord2)
+            #print(torch.sum((in_cord1-in_cord2)**2))
             in_diff_list.append(torch.sqrt(torch.sum((in_cord1-in_cord2)**2)))
             #in_diff_list.append(torch.sum(in_cord1-in_cord2))
-        in_diff_sum = Variable(torch.stack(in_diff_list, dim=0), requires_grad = True).cuda()
-        
+        in_diff_sum = torch.stack(in_diff_list, dim=0).cuda()
+        #print('in_diff_sum:',in_diff_sum)
+
         lat_diff_list = []
-        for n, m in itertools.product(range(BATCH_SIZE), range(BATCH_SIZE)):
-            lat_cord1 = lat_min + lat_repr[n]
-            lat_cord2 = lat_min + lat_repr[m]
+        for n in itertools.combinations(range(BATCH_SIZE), 2):
+            lat_cord1 = lat_min + lat_repr[n[0]]
+            lat_cord2 = lat_min + lat_repr[n[1]]
+            #print(n, '|', lat_cord1, '|', lat_cord2)
             lat_diff_list.append(torch.sqrt(torch.sum((lat_cord1-lat_cord2)**2)))
             #lat_diff_list.append(torch.sum(lat_cord1-lat_cord2))
-        lat_diff_sum = Variable(torch.stack(lat_diff_list, dim=0), requires_grad = True).cuda()
+        lat_diff_sum = torch.stack(lat_diff_list, dim=0).cuda()
+        #print(lat_diff_sum)
+        #print('lat_diff_sum:',in_diff_sum)
+
 
         #----------------------------------------
         output = self.decoder(y).cuda()
+        # print(output)
         return output, in_diff_sum, lat_diff_sum, lat_repr
