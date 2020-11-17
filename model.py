@@ -4,47 +4,125 @@ import itertools
 import numpy as np
 from torch.autograd import Variable
 from torch import tan, atan
-BATCH_SIZE = 4#3#
-INPUT_AXIS = 3
+import torch.nn.functional as F
+from torch.nn.parameter import Parameter
+BATCH_SIZE = 16#3#
+INPUT_AXIS = 784
+LATENT_DIMENSION = 2
+shape_log = False
+default_Gradient = 0.00001
+delete_max = 10
 A = int(BATCH_SIZE*INPUT_AXIS)#1536
-B = int(BATCH_SIZE*INPUT_AXIS)
-C = int(BATCH_SIZE*INPUT_AXIS)
-D = int(BATCH_SIZE*(INPUT_AXIS-1))#int(C/4)batch_size*(axis-1)
+B = int(BATCH_SIZE*(INPUT_AXIS/2))
+C = int(BATCH_SIZE*(INPUT_AXIS/4))
+D = int(BATCH_SIZE*2)#int(C/4)batch_size*(axis-1)
+E = int(BATCH_SIZE*LATENT_DIMENSION)#int(C/4)batch_size*(axis-1)
+
+##########外側5%を省いて学習を繰り返す
 class autoencoder(nn.Module):
-    def __init__(self):
+    def __init__(self, Gradient = default_Gradient):
         super(autoencoder, self).__init__()
+        
+        self.Gradient = Parameter(torch.tensor(Gradient)**2)#2乗で正
+        self.Gradient.requiresGrad = True
+
         self.encoder = nn.Sequential(
-            nn.Linear(A, B),####
-#             nn.Linear(B, C),
-            # nn.Linear(C, C),
-            nn.Linear(C, D),####
-            nn.Tanh(),
+            nn.Conv2d(1, 16, 3, stride=2, padding=1),###############畳み込みを粗くする
+            nn.BatchNorm2d(16),
+            # nn.LeakyReLU(),
+
+            nn.Conv2d(16, 32, 3, stride=2, padding=1),
+            nn.BatchNorm2d(32),
+            # nn.LeakyReLU(),
+
+            nn.Conv2d(32, 64, 3, stride=2, padding=0),
+            nn.BatchNorm2d(64),
+            # nn.LeakyReLU(),
+
+            nn.Conv2d(64, 64, 3, stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            # nn.LeakyReLU(),
+
+            nn.Conv2d(64, 64, 3, stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            # nn.LeakyReLU(),
             )
+
+        self.full_connection = nn.Sequential(
+            nn.Linear(BATCH_SIZE*64, BATCH_SIZE*8),
+            nn.Linear(BATCH_SIZE*8, BATCH_SIZE*LATENT_DIMENSION),
+            )
+
+        self.tr_full_connection = nn.Sequential(
+            nn.Linear(BATCH_SIZE*LATENT_DIMENSION, BATCH_SIZE*8),
+            nn.Linear(BATCH_SIZE*8, BATCH_SIZE*64),
+            )
+
         self.decoder = nn.Sequential(
-            nn.Linear(D, C),####
-            # nn.Linear(C, C),
-#             nn.Linear(C, B),
-            nn.Linear(B, A),####
-            nn.Tanh()####Tanh
+            nn.Upsample(scale_factor=2),
+            nn.Conv2d(64, 64, 3, padding=1),
+            nn.BatchNorm2d(64),
+            # nn.LeakyReLU(),
+
+            nn.Upsample(scale_factor=2),
+            nn.Conv2d(64, 64, 3, padding=1),
+            nn.BatchNorm2d(64),
+            # nn.LeakyReLU(),
+
+            nn.Upsample(scale_factor=2),
+            nn.Conv2d(64, 64, 3, padding=1),
+            nn.BatchNorm2d(64),
+            # nn.LeakyReLU(),
+
+            nn.Upsample(scale_factor=2),
+            nn.Conv2d(64, 32, 3, padding=0),
+            nn.BatchNorm2d(32),
+            # nn.LeakyReLU(),
+
+            nn.Upsample(scale_factor=2),
+            nn.Conv2d(32, 16, 3, padding=1),
+            nn.BatchNorm2d(16),
+            # nn.LeakyReLU(),
+
+            nn.Conv2d(16, 1, 3, padding=1),
+            nn.Tanh(),
+
+            #-------------------------------------------
+            # nn.ConvTranspose2d(64, 32, 7),
+            # nn.BatchNorm2d(32),
+            # nn.LeakyReLU(),
+            # nn.ConvTranspose2d(32, 16, 3, stride=2, padding=1, output_padding=1),
+            # nn.BatchNorm2d(16),
+            # nn.LeakyReLU(),
+            # nn.ConvTranspose2d(16, 1, 3, stride=2, padding=1, output_padding=1),
+            # nn.Tanh()
             )
-    
+
+        self._ReLU1 = nn.ReLU()
+        self._ReLU2 = nn.ReLU()
+
     def forward(self, x):
+        if shape_log == True: print(f'x:{x.shape}')
         y = self.encoder(x).cuda()
-        in_data = x.reshape(BATCH_SIZE, INPUT_AXIS).cuda()#32,3
-        lat_repr = y.reshape(BATCH_SIZE, INPUT_AXIS-1).cuda()#32, 2
+        if shape_log == True: print(f'y = encorder(x):{y.shape}')
+        y = y.view(-1)
+        y = self.full_connection(y).cuda()
+        lat_repr = y.reshape(BATCH_SIZE, LATENT_DIMENSION).cuda()#################################
+        if shape_log == True: print(f'full_connection(y):{y.shape}')
+
+        #----------------------------------------
+        in_data = x.reshape(BATCH_SIZE, INPUT_AXIS).cuda()
+
+        #print(lat_repr)
         in_min = torch.min(in_data).cuda()
         lat_min  = torch.min(lat_repr).cuda()
-        #---------------------各点からの距離
-        in_diff_list = []#各点同士の距離の組み合わせ
+        in_diff_list = []
         for n in itertools.combinations(range(BATCH_SIZE), 2):#同じもの同士を比較しない
             in_cord1 = in_min + in_data[n[0]]
             in_cord2 = in_min + in_data[n[1]]
             #print(n, '|', in_cord1, '|', in_cord2)
-            #print(torch.sum((in_cord1-in_cord2)**2))
-            in_diff_list.append(torch.sqrt(torch.sum((in_cord1-in_cord2)**2)))
-            #in_diff_list.append(torch.sum(in_cord1-in_cord2))
+            in_diff_list.append(torch.sqrt(torch.sum((in_cord1-in_cord2)**2)))#L2ノルムでいいのか？
         in_diff_sum = torch.stack(in_diff_list, dim=0).cuda()
-        #print('in_diff_sum:',in_diff_sum)
 
         lat_diff_list = []
         for n in itertools.combinations(range(BATCH_SIZE), 2):
@@ -52,13 +130,49 @@ class autoencoder(nn.Module):
             lat_cord2 = lat_min + lat_repr[n[1]]
             #print(n, '|', lat_cord1, '|', lat_cord2)
             lat_diff_list.append(torch.sqrt(torch.sum((lat_cord1-lat_cord2)**2)))
-            #lat_diff_list.append(torch.sum(lat_cord1-lat_cord2))
         lat_diff_sum = torch.stack(lat_diff_list, dim=0).cuda()
-        #print(lat_diff_sum)
-        #print('lat_diff_sum:',in_diff_sum)
 
+        
+        #----------------------------------------
+        y = self.tr_full_connection(y).cuda()
+        if shape_log == True: print(f'tr_full_connection(y):{y.shape}')
+        y = y.view(BATCH_SIZE, 64, 1, 1)
+        output = self.decoder(y).cuda()
+        if shape_log == True: print(f'decoder(y):{output.shape}')
+
+        ###########大きい距離を無視
+        for x in range(delete_max):
+            in_diff_sum[torch.argmax(in_diff_sum)] = 0
+            lat_diff_sum[torch.argmax(lat_diff_sum)] = 0
 
         #----------------------------------------
-        output = self.decoder(y).cuda()
-        # print(output)
-        return output, in_diff_sum, lat_diff_sum, lat_repr
+        #print(f'{torch.mean(lat_diff_sum)}::::{torch.mean(in_diff_sum)}')
+        
+        ###########ガウス分布、平均に学習可能なパラメータを用いる
+        # exp_in_diff_sum = (1 / torch.sqrt(6.283*torch.var(in_diff_sum))
+        # )*torch.exp(-1 * (((in_diff_sum - self.in_mean) **2 ) / (2 * torch.var(in_diff_sum)))).cuda()
+        # exp_lat_diff_sum = (1 / torch.sqrt(6.283*torch.var(lat_diff_sum))
+        # )*torch.exp(-1 * (((lat_diff_sum - self.lat_mean) **2 ) / (2 * torch.var(lat_diff_sum)))).cuda()
+        
+        ##########ガウス分布、平均にそのバッチごとの平均を用いる
+        # exp_in_diff_sum = (1 / torch.sqrt(6.283*torch.var(in_diff_sum))
+        # )*torch.exp(-1 * (((in_diff_sum - torch.mean(in_diff_sum)) **2 ) / (2 * torch.var(in_diff_sum)))).cuda()
+        # exp_lat_diff_sum = (1 / torch.sqrt(6.283*torch.var(lat_diff_sum))
+        # )*torch.exp(-1 * (((lat_diff_sum - torch.mean(lat_diff_sum)) **2 ) / (2 * torch.var(lat_diff_sum)))).cuda()
+
+        #y = y*self._ReLU1(((-1*self.Gradient)*y)+1)
+        #lat_diff_sum = lat_diff_sum*self._ReLU1(((-1*self.Gradient)*lat_diff_sum)+1)
+        #in_diff_sum = in_diff_sum*self._ReLU2(((-1*self.Gradient)*in_diff_sum)+1)
+
+        #print(f'{self.lat_mean}____{self.in_mean}')
+        # exp_in_diff_sum = self._ReLU1(exp_in_diff_sum)#変換後に距離の値が負になる可能性があるのでReLUにかける
+        # exp_lat_diff_sum = self._ReLU2(exp_lat_diff_sum)
+
+        ##############逆さまの正規分布は？逆正弦分布
+        ##############手前でロスを取ってから2次元に圧縮(out_repr)
+        # lat_diff_sum =  lat_diff_sum - (lat_diff_sum*exp_lat_diff_sum)
+        # in_diff_sum = in_diff_sum - (in_diff_sum*exp_in_diff_sum)
+        # lat_diff_sum = lat_diff_sum - torch.min(lat_diff_sum)
+        # in_diff_sum = in_diff_sum - torch.min(in_diff_sum)
+
+        return output, in_diff_sum, lat_diff_sum, lat_repr#output, in_diff_sum, lat_diff_sum, lat_repr#
