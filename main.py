@@ -34,7 +34,7 @@ torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
 
 # %%
-n_samples = 69990#15000#
+n_samples = 15000#69990#
 num_epochs = 30
 learning_rate = 1e-3
 early_stopping = 50
@@ -42,15 +42,15 @@ g_distance = torch.Tensor()
 g_mse = torch.Tensor()
 g_distance_list = []
 g_mse_list = []
-wd = 0.0#000001#00001
+wd = 0.01
 sigma = 2#外れ値の除外に使う
 
 #%%
-seed = 10
-random.seed(seed)
-np.random.seed(seed)
-torch.manual_seed(seed)
-torch.cuda.manual_seed(seed)
+# seed = 10
+# random.seed(seed)
+# np.random.seed(seed)
+# torch.manual_seed(seed)
+# torch.cuda.manual_seed(seed)
 
 # %%
 in_data, color = fetch_openml('mnist_784', version=1, return_X_y=True, data_home='./MNIST/')
@@ -65,7 +65,7 @@ def custom_loss(output, target, in_diff_sum, lat_diff_sum):
     MSE = nn.MSELoss(reduction='mean').cuda()
     g_mse = MSE(output, target)
     g_distance = KL_divergence(SM(in_diff_sum).log(), SM(lat_diff_sum))
-    loss = g_mse + ((1e+05)*g_distance)
+    loss = g_mse + (50*g_distance)
     return loss
 
 
@@ -73,11 +73,11 @@ def custom_loss(output, target, in_diff_sum, lat_diff_sum):
 def plot_latent(in_data, color):
     if LATENT_DIMENSION == 2:
         df = pd.DataFrame({'X':in_data[:, 0], 'Y':in_data[:, 1], 'Labels':color}).sort_values('Labels')
-        fig = px.scatter(df, x='X', y='Y', color='Labels', color_discrete_sequence=px.colors.qualitative.D3)
+        fig = px.scatter(df, x='X', y='Y', color='Labels', color_discrete_sequence=px.colors.qualitative.D3, size_max=5, opacity=1.0)
         fig.update_layout(yaxis=dict(scaleanchor='x'), showlegend=True)#縦横比を1:1に
     if LATENT_DIMENSION == 3:
         df = pd.DataFrame({'X':in_data[:, 0], 'Y':in_data[:, 1], 'Z':in_data[:, 2], 'Labels':color}).sort_values('Labels')
-        fig = px.scatter_3d(df, x='X', y='Y', z='Z', color='Labels', color_discrete_sequence=px.colors.qualitative.D3, size=np.repeat(10, len(in_data)), size_max=10, opacity=1.0)
+        fig = px.scatter_3d(df, x='X', y='Y', z='Z', color='Labels', color_discrete_sequence=px.colors.qualitative.D3, size=np.repeat(10, len(in_data)), size_max=5, opacity=1.0)
         fig.update_layout(showlegend=True)#縦横比を1:1に
     return fig
 

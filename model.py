@@ -6,6 +6,7 @@ from torch.autograd import Variable
 from torch import tan, atan
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
+import numpy as np
 BATCH_SIZE = 3#3#
 INPUT_AXIS = 784
 LATENT_DIMENSION = 2
@@ -29,37 +30,38 @@ class autoencoder(nn.Module):
         self.encoder = nn.Sequential(
             nn.Conv2d(1, 15, 3, stride=2, padding=1),###############畳み込みを粗くする
             nn.BatchNorm2d(15),
-            # nn.LeakyReLU(),
+            nn.ReLU(),
 
             nn.Conv2d(15, 30, 3, stride=2, padding=1),
             nn.BatchNorm2d(30),
-            # nn.LeakyReLU(),
+            nn.ReLU(),
 
             nn.Conv2d(30, 60, 3, stride=2, padding=0),
             nn.BatchNorm2d(60),
-            # nn.LeakyReLU(),
+            nn.ReLU(),
 
             nn.Conv2d(60, 60, 3, stride=2, padding=1),
             nn.BatchNorm2d(60),
-            # nn.LeakyReLU(),
+            nn.ReLU(),
 
             nn.Conv2d(60, 60, 3, stride=2, padding=1),
             nn.BatchNorm2d(60),
-            # nn.LeakyReLU(),
+            nn.ReLU(),
             )
 
         self.full_connection = nn.Sequential(
             nn.Linear(BATCH_SIZE*60, BATCH_SIZE*36),
-            #nn.Dropout(0.2),
-            nn.Linear(BATCH_SIZE*36, BATCH_SIZE*12),
-            nn.Dropout(0.2),
-            nn.Linear(BATCH_SIZE*12, BATCH_SIZE*LATENT_DIMENSION),
-            # nn.ReLU()
+            nn.Dropout(0.1),
+            # nn.Linear(BATCH_SIZE*36, BATCH_SIZE*12),
+            # nn.Dropout(0.1),
+            nn.Linear(BATCH_SIZE*36, BATCH_SIZE*LATENT_DIMENSION),
             )
 
         self.tr_full_connection = nn.Sequential(
-            nn.Linear(BATCH_SIZE*LATENT_DIMENSION, BATCH_SIZE*12),
-            nn.Linear(BATCH_SIZE*12, BATCH_SIZE*36),
+            nn.Linear(BATCH_SIZE*LATENT_DIMENSION, BATCH_SIZE*36),
+            nn.Dropout(0.1),
+            # nn.Linear(BATCH_SIZE*12, BATCH_SIZE*36),
+            # nn.Dropout(0.1),
             nn.Linear(BATCH_SIZE*36, BATCH_SIZE*60),
             )
 
@@ -67,30 +69,30 @@ class autoencoder(nn.Module):
             nn.Upsample(scale_factor=2),
             nn.Conv2d(60, 60, 3, padding=1),
             nn.BatchNorm2d(60),
-            # nn.LeakyReLU(),
+            nn.ReLU(),
 
             nn.Upsample(scale_factor=2),
             nn.Conv2d(60, 60, 3, padding=1),
             nn.BatchNorm2d(60),
-            # nn.LeakyReLU(),
+            nn.ReLU(),
 
             nn.Upsample(scale_factor=2),
             nn.Conv2d(60, 60, 3, padding=1),
             nn.BatchNorm2d(60),
-            # nn.LeakyReLU(),
+            nn.ReLU(),
 
             nn.Upsample(scale_factor=2),
             nn.Conv2d(60, 30, 3, padding=0),
             nn.BatchNorm2d(30),
-            # nn.LeakyReLU(),
+            nn.ReLU(),
 
             nn.Upsample(scale_factor=2),
             nn.Conv2d(30, 15, 3, padding=1),
             nn.BatchNorm2d(15),
-            # nn.LeakyReLU(),
+            nn.ReLU(),
 
             nn.Conv2d(15, 1, 3, padding=1),
-            # nn.Dropout(0.2),
+            #nn.Dropout(0.1),
             nn.Tanh(),
 
             #-------------------------------------------
@@ -104,8 +106,8 @@ class autoencoder(nn.Module):
             # nn.Tanh()
             )
 
-        self._ReLU1 = nn.ReLU()
-        self._ReLU2 = nn.ReLU()
+        self.Softmax1 = nn.Softmax()
+        self.Softmax2 = nn.Softmax()
 
     def forward(self, x):
         if shape_log == True: print(f'x:{x.shape}')
@@ -179,10 +181,11 @@ class autoencoder(nn.Module):
         # in_diff_sum = in_diff_sum - (in_diff_sum*exp_in_diff_sum)
         # lat_diff_sum = lat_diff_sum - torch.min(lat_diff_sum)
         # in_diff_sum = in_diff_sum - torch.min(in_diff_sum)
-
         ##############T分布
-        in_diff_sum += 1
-        lat_diff_sum += 1
-        exp_in_diff_sum = in_diff_sum*(1 / (3.1415*(1 + (in_diff_sum**2)))).cuda()
+        # in_diff_sum = self.Softmax1(in_diff_sum)
+        # lat_diff_sum = self.Softmax2(lat_diff_sum)
+        perplexity = 1
+        exp_in_diff_sum = (1 / (torch.sqrt(torch.Tensor([6.283*perplexity]))))*torch.exp(-1*(((in_diff_sum - 0)**2) / (2*perplexity))).cuda()
+        #exp_in_diff_sum = in_diff_sum*(1 / (3.1415*(1 + (in_diff_sum**2)))).cuda()
         exp_lat_diff_sum = lat_diff_sum*(1 / (3.1415*(1 + (lat_diff_sum**2)))).cuda()
         return output, exp_in_diff_sum, exp_lat_diff_sum, lat_repr#output, in_diff_sum, lat_diff_sum, lat_repr#
