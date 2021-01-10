@@ -11,56 +11,48 @@ import plotly
 from sklearn import datasets, decomposition, manifold, preprocessing
 from colorsys import hsv_to_rgb
 from coranking import *
+import pandas as pd
+import plotly.express as px
+#%%
 import umap
 import gc
 import random
+from model import *
+#%%
 get_ipython().run_line_magic('matplotlib', 'inline')
-convex=False
-rotate=False
-n_samples = 3**9
+in_data, color = datasets.fetch_openml('mnist_784', version=1, return_X_y=True, data_home='./MNIST/')
+in_data = in_data-128
+in_data /= 255
 sns.set(context="paper", style="white")
-sr, swissroll_labels = datasets.make_swiss_roll(n_samples=n_samples, noise=0)
-print('a')
-np_x = np.array(sr)
-if convex:
-    np_x = np.array([[x[0], x[1]+(c*2), x[2]] for c, x in zip(swissroll_labels, list(np_x))])
-if rotate:
-    np_x = np.array([[x[0]+x[0], (x[2]-x[1]), (x[1]+x[2])] for x in list(np_x)])
-# np_x[:, 1] = np_x[:, 1] / 2
-swissroll = np_x
-print('b')
-fig = plt.figure(figsize=(10,15))
-ax = fig.add_subplot(211, projection='3d')
-ax.scatter(swissroll[:, 0], swissroll[:, 1], swissroll[:, 2], c=swissroll_labels, cmap="coolwarm")
-plt.show()
-
 
 # %%
 reducers = [
-    (decomposition.PCA, {"iterated_power": 1000}),
+    (decomposition.PCA, {}),#"iterated_power": 1000
     (umap.UMAP, {"n_neighbors": 30, "min_dist": 0.3}),
     (manifold.TSNE, {"perplexity": 50}),
     (manifold.MDS, {}),
 ]
 
 test_data = [
-    (swissroll, swissroll_labels),
+    (in_data, color),
 ]
-dataset_names = ["Swiss Roll"]
+dataset_names = ["MNIST"]
 
 n_rows = len(test_data)
 n_cols = len(reducers)
-
+n_samples = len(in_data)
+print(n_rows, n_cols, n_samples)
 
 # %%
-def plot_swissroll(sr, color, dim):
-    if dim == 3:
-        plotly.offline.init_notebook_mode()
-        fig = go.Figure(data=[go.Scatter3d(x=sr[:, 0], y=sr[:, 1], z=sr[:, 2], mode='markers', marker=dict(size=1, color=color, colorscale="blugrn"))])
-    elif dim == 2:
-        plotly.offline.init_notebook_mode()
-        fig = go.Figure(data=[go.Scatter(x=sr[:, 0], y=sr[:, 1], mode='markers', marker=dict(size=5, color=color, colorscale="blugrn"))])
-    fig.update_layout(yaxis=dict(scaleanchor='x'))#縦横比を1:1に
+def plot_latent(in_data, color):
+    if LATENT_DIMENSION == 2:
+        df = pd.DataFrame({'X':in_data[:, 0], 'Y':in_data[:, 1], 'Labels':color}).sort_values('Labels')
+        fig = px.scatter(df, x='X', y='Y', color='Labels', color_discrete_sequence=px.colors.qualitative.D3, size_max=5, opacity=0.5)
+        fig.update_layout(yaxis=dict(scaleanchor='x'), showlegend=True)#縦横比を1:1に
+    if LATENT_DIMENSION == 3:
+        df = pd.DataFrame({'X':in_data[:, 0], 'Y':in_data[:, 1], 'Z':in_data[:, 2], 'Labels':color}).sort_values('Labels')
+        fig = px.scatter_3d(df, x='X', y='Y', z='Z', color='Labels', color_discrete_sequence=px.colors.qualitative.D3, size=np.repeat(10, len(in_data)), size_max=5, opacity=0.5)
+        fig.update_layout(showlegend=True)#縦横比を1:1に
     return fig
 
 
@@ -71,6 +63,8 @@ sampling_num = 1000
 n_sampling_iter=20
 for np_x, labels in test_data:
     for reducer, args in reducers:
+        if strings[s]=='MDS':
+            break
         global_score = 0
         local_score = 0
         start_time = time.time()
@@ -90,9 +84,8 @@ for np_x, labels in test_data:
             local_score += CoRanking(rnd_np_x).evaluate_corank_matrix(rnd_result, 50, 10) / n_sampling_iter
         print(f'LOCAL_SCORE:{str(reducer).split(".")[2]}:{local_score}')
         fn = f'{strings[s]}_{elapsed_time}'
-        plot_swissroll(result, swissroll_labels, 2).update_layout(title=fn).write_image(f"./comparision/{strings[s]}.png")
-        s+=1
-
+        plot_latent(result, color).update_layout(title=fn).write_image(f"./comparision/{strings[s]}.png")
+        s += 1
 
 # %%
 
