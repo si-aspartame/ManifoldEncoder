@@ -38,14 +38,14 @@ torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
 # %%
 n_samples = 70000-(70000%BATCH_SIZE)#18000
-num_epochs = 30
+num_epochs = 5
 learning_rate = 1e-4
 early_stopping = 50
 g_distance = torch.Tensor()
 g_mse = torch.Tensor()
 g_distance_list = []
 g_mse_list = []
-wd = 0.0
+wd = 0.01
 sigma = 2#外れ値の除外に使う
 
 #%%
@@ -67,10 +67,14 @@ def custom_loss(output, target, in_diff_sum, lat_diff_sum, out_diff_sum):
     KL_divergence = nn.KLDivLoss().cuda()#reduction="sum"
     SM = nn.Softmax(dim=0).cuda()
     MSE = nn.MSELoss(reduction='mean').cuda()
-    g_mse = MSE(output, target)
+
+    g_mse = MSE(output, target)#Encoder to Decoder's MSE
+    #####################################################################################
     x2z = (0.5*(KL_divergence(SM(in_diff_sum).log(), SM(lat_diff_sum))+KL_divergence(SM(lat_diff_sum).log(), SM(in_diff_sum))))
     z2y = (0.5*(KL_divergence(SM(lat_diff_sum).log(), SM(out_diff_sum))+KL_divergence(SM(out_diff_sum).log(), SM(lat_diff_sum))))
     g_distance = (x2z+z2y) / 4
+
+    #####################################################################################
     #loss = g_distance
     loss = g_mse + g_distance
     return loss
@@ -91,10 +95,10 @@ def plot_latent(in_data, color):
 
 
 # %%
-model = autoencoder().cuda()
+AE = autoencoder().cuda()
 criterion = custom_loss
-optimizer = RAdam(model.parameters(), lr=learning_rate, weight_decay=wd)#weight_decay
-print(model)
+optimizer = RAdam(AE.parameters(), lr=learning_rate, weight_decay=wd)#weight_decay
+print(AE)
 
 # %%
 global in_ndarray, color, in_tensor
@@ -103,17 +107,17 @@ color = color[:n_samples]
 in_tensor = torch.from_numpy(in_ndarray)#in_ndarrayをテンソルにしたもの
 print(f"in_tensor.shape:{in_tensor.shape}")
 #%%
-def next_epoch(model, epoch, g_mse, g_distance):
+def next_epoch(AE, epoch, g_mse, g_distance):
     result=np.empty((0, INPUT_AXIS))
     lat_result=np.empty((0, LATENT_DIMENSION))
-    model.eval()
+    AE.eval()
     for n, data in enumerate(DataLoader(in_tensor, batch_size=BATCH_SIZE, shuffle=False)):#シャッフルしない
         #print(f'TEST:{n}')
         batch = data
         batch = batch.reshape(BATCH_SIZE, 1, 28, 28)
         batch = Variable(batch).cuda()
         # ===================forward=====================
-        output, _, _, _, lat_repr = model(batch)
+        output, _, _, _, lat_repr = AE(batch)
         lat_result=np.vstack([lat_result, lat_repr.data.cpu().numpy().reshape(BATCH_SIZE, LATENT_DIMENSION)])
     sampling_num = 3000
     rnd_idx = [random.randint(0, len(in_tensor)-1) for i in range(sampling_num)]
@@ -132,27 +136,27 @@ for epoch in range(1, num_epochs+1):
     temp_mse = 0
     temp_distance = 0
     temp_loss = 0
-    model.train()
+    AE.train()
     data_iter = DataLoader(in_tensor, batch_size=BATCH_SIZE, shuffle=True)
     for data in data_iter:
         batch = data
         #print(f'batch.shape:{batch.shape}')
         batch = batch.reshape(BATCH_SIZE, 1, 28, 28)
         batch = Variable(batch).cuda()
+        optimizer.zero_grad()
         # ===================forward=====================
-        output, in_diff_sum, lat_diff_sum, out_diff_sum, _ = model(batch)
-        loss = criterion(output, batch, in_diff_sum, lat_diff_sum, out_diff_sum)#batch = 入力 = 教師データ
+        output, in_diff_sum, lat_diff_sum, out_diff_sum, _ = AE(batch)
+        loss = criterion(output, batch, in_diff_sum, lat_diff_sum, out_diff_sum)
+        loss.backward(retain_graph=True)#batch = 入力 = 教師データ
         #print(loss)
         # ===================backward====================
-        optimizer.zero_grad()
-        loss.backward(retain_graph=True)
         optimizer.step()
         temp_mse += g_mse.data.sum().item() / (n_samples / BATCH_SIZE)
         temp_distance += g_distance.data.sum().item() / (n_samples / BATCH_SIZE)
         temp_loss += loss.data.sum().item() / (n_samples / BATCH_SIZE)
     if temp_loss < best_loss:
         print('[BEST] ', end='')
-        torch.save(model.state_dict(), f'./output/{epoch}.pth')
+        torch.save(AE.state_dict(), f'./output/{epoch}.pth')
         best_loss = temp_loss
         es_count = 0
     es_count += 1
@@ -161,7 +165,7 @@ for epoch in range(1, num_epochs+1):
     all_loss.append([epoch, temp_loss, temp_mse, temp_distance])
     g_mse_list.append(temp_mse)
     g_distance_list.append(temp_distance)
-    next_epoch(model, epoch, temp_mse, temp_distance)
+    next_epoch(AE, epoch, temp_mse, temp_distance)
     if es_count == early_stopping or (temp_distance+temp_mse)==0.0:
         print('early stopping!')
         break#early_stopping
