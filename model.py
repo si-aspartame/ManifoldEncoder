@@ -7,6 +7,8 @@ from torch import tan, atan
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
 import numpy as np
+from scipy.special import comb
+
 BATCH_SIZE = 4#3#
 INPUT_AXIS = 784
 LATENT_DIMENSION = 2
@@ -123,22 +125,15 @@ class autoencoder(nn.Module):
 
 #Discriminatorはx,z,yのユークリッド距離のベクトルが入力
 class D_x2z(nn.Module):
-    def __init__(self, args):
+    def __init__(self):
         super(D_x2z, self).__init__()
-
-        self.n_channel = 1
-        self.dim_h = 1
-        self.n_z = 1
+        num_comb = comb(BATCH_SIZE, 2, exact=True)#組み合わせの数
         self.main = nn.Sequential(
-            nn.Linear(self.n_z, self.dim_h * 4),
-            nn.ReLU(True),
-            nn.Linear(self.dim_h * 4, self.dim_h * 4),
-            nn.ReLU(True),
-            nn.Linear(self.dim_h * 4, self.dim_h * 4),
-            nn.ReLU(True),
-            nn.Linear(self.dim_h * 4, self.dim_h * 4),
-            nn.ReLU(True),
-            nn.Linear(self.dim_h * 4, 1),
+            nn.Linear(num_comb, num_comb),
+            nn.ReLU(),
+            nn.Linear(num_comb, num_comb),
+            nn.ReLU(),
+            nn.Linear(num_comb, 1),
             nn.Sigmoid()#出力は0~1でサイズは[batch_size, 1]
         )
 
@@ -147,21 +142,15 @@ class D_x2z(nn.Module):
         return x
 
 class D_z2y(nn.Module):
-    def __init__(self, args):
+    def __init__(self):
         super(D_z2y, self).__init__()
-        self.n_channel = 1
-        self.dim_h = 1
-        self.n_z = 1
+        num_comb = comb(BATCH_SIZE, 2, exact=True)#組み合わせの数
         self.main = nn.Sequential(
-            nn.Linear(self.n_z, self.dim_h * 4),
-            nn.ReLU(True),
-            nn.Linear(self.dim_h * 4, self.dim_h * 4),
-            nn.ReLU(True),
-            nn.Linear(self.dim_h * 4, self.dim_h * 4),
-            nn.ReLU(True),
-            nn.Linear(self.dim_h * 4, self.dim_h * 4),
-            nn.ReLU(True),
-            nn.Linear(self.dim_h * 4, 1),
+            nn.Linear(num_comb, num_comb),
+            nn.ReLU(),
+            nn.Linear(num_comb, num_comb),
+            nn.ReLU(),
+            nn.Linear(num_comb, 1),
             nn.Sigmoid()#出力は0~1でサイズは[batch_size, 1]
         )
 
