@@ -25,6 +25,7 @@ from radam import *
 from model import *
 import time
 from coranking import *
+from torchvision.utils import save_image
 plotly.offline.init_notebook_mode(connected=True)
 get_ipython().run_line_magic('load_ext', 'autoreload')
 get_ipython().run_line_magic('autoreload', '2')
@@ -37,8 +38,8 @@ torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
 
 # %%
-n_samples = 10000-(10000%BATCH_SIZE)#18000
-num_epochs = 5
+n_samples = 70000-(70000%BATCH_SIZE)#18000
+num_epochs = 10
 learning_rate = 1e-4
 early_stopping = 50
 g_distance = torch.Tensor()
@@ -47,7 +48,6 @@ g_distance_list = []
 g_mse_list = []
 wd = 0.01
 sigma = 2#外れ値の除外に使う
-LAMBDA = 1
 
 #%%
 seed = 10
@@ -60,86 +60,20 @@ torch.cuda.manual_seed(seed)
 in_data, color = fetch_openml('mnist_784', version=1, return_X_y=True, data_home='./MNIST/')
 in_data = preprocessing.MinMaxScaler().fit_transform(in_data)
 #in_data /= 255
-#%%
-def free_params(module: nn.Module):
-    for p in module.parameters():
-        p.requires_grad = True
 
-def frozen_params(module: nn.Module):
-    for p in module.parameters():
-        p.requires_grad = False
 #%%
-one = torch.tensor(1, dtype=torch.float)#1
-MINUS_ONE = one * -1#-1
-#%%
-def custom_loss(output, target, lat_repr, in_diff_sum, lat_diff_sum, out_diff_sum, AE, D_x2z, D_z2y):
+def custom_loss(output, target, in_diff_sum, lat_diff_sum, out_diff_sum):
     global g_distance, g_mse
     KL_divergence = nn.KLDivLoss().cuda()#reduction="sum"
     SM = nn.Softmax(dim=0).cuda()
     MSE = nn.MSELoss(reduction='mean').cuda()
-
-    g_mse = MSE(output, target)#Encoder to Decoder's MSE
-    #####################################################################################
-    frozen_params(AE.encoder)
-    frozen_params(AE.full_connection)
-    frozen_params(AE.tr_full_connection)
-    frozen_params(AE.decoder)
-    frozen_params(D_x2z.main)
-    frozen_params(D_z2y.main)
-
-    free_params(D_x2z.main)
-    torch.log(D_x2z(in_diff_sum)).mean().backward(MINUS_ONE, retain_graph=True)
-    torch.log(1-D_x2z(lat_diff_sum)).mean().backward(MINUS_ONE, retain_graph=True)
-    frozen_params(D_x2z.main)
-
-    free_params(D_z2y.main)
-    torch.log(D_x2z(lat_diff_sum)).mean().backward(MINUS_ONE, retain_graph=True)
-    torch.log(1-D_x2z(out_diff_sum)).mean().backward(MINUS_ONE, retain_graph=True)
-    frozen_params(D_z2y.main)
-
-    free_params(AE.encoder)
-    free_params(AE.full_connection)
-    free_params(AE.tr_full_connection)
-    free_params(AE.decoder)
-    g_mse.backward(retain_graph=True)
-    frozen_params(AE.encoder)
-    frozen_params(AE.full_connection)
-    frozen_params(AE.tr_full_connection)
-    frozen_params(AE.decoder)
-
-    free_params(AE.encoder)
-    free_params(AE.full_connection)
-    x = target#targetは入力
-    encoded = AE.full_connection(AE.encoder(x).view(-1))
-    D_x2z_loss = LAMBDA * (torch.log(D_x2z.main(make_distance_tensor(encoded)))).mean()
-    D_x2z_loss.backward(MINUS_ONE, retain_graph=True)
-    frozen_params(AE.encoder)#(仮)
-    frozen_params(AE.full_connection)
-
-    free_params(AE.tr_full_connection)
-    free_params(AE.decoder)
-    z = lat_repr.view(-1)
-    decoded = AE.decoder(AE.tr_full_connection(z).view(BATCH_SIZE, 64, 1, 1))
-    D_z2y_loss = LAMBDA * (torch.log(D_z2y.main(make_distance_tensor(decoded)))).mean()
-    D_z2y_loss.backward(MINUS_ONE, retain_graph=True)
-    frozen_params(AE.tr_full_connection)
-    frozen_params(AE.decoder)#なくてもいい
-
-    free_params(AE.encoder)
-    free_params(AE.full_connection)
-    free_params(AE.tr_full_connection)
-    free_params(AE.decoder)
-    free_params(D_x2z.main)
-    free_params(D_z2y.main)
-
-    g_distance = -((D_x2z_loss + D_z2y_loss) / 2)
-    #####################################################################################
-    # x2z = (0.5*(KL_divergence(SM(in_diff_sum).log(), SM(lat_diff_sum))+KL_divergence(SM(lat_diff_sum).log(), SM(in_diff_sum))))
-    # z2y = (0.5*(KL_divergence(SM(lat_diff_sum).log(), SM(out_diff_sum))+KL_divergence(SM(out_diff_sum).log(), SM(lat_diff_sum))))
-    # g_distance = (x2z+z2y) / 4
-    #loss = g_mse + g_distance
-    #####################################################################################
-    return
+    g_mse = MSE(output, target)
+    x2z = ((KL_divergence(SM(in_diff_sum).log(), SM(lat_diff_sum))+KL_divergence(SM(lat_diff_sum).log(), SM(in_diff_sum))) / 2)
+    z2y = ((KL_divergence(SM(lat_diff_sum).log(), SM(out_diff_sum))+KL_divergence(SM(out_diff_sum).log(), SM(lat_diff_sum))) / 2)
+    g_distance = (x2z+z2y) / 2
+    #loss = g_distance
+    loss = g_mse + 0.5*g_distance
+    return loss
 
 
 # %%
@@ -154,17 +88,23 @@ def plot_latent(in_data, color):
         fig.update_layout(showlegend=True)#縦横比を1:1に
     return fig
 
+def plot_manifold(model, n_max, n_min):
+    model.eval()
+    num_points = BATCH_SIZE * 2
+    points = [[n*(n_max-n_min)/num_points, m*(n_max-n_min)/num_points] for n, m in itertools.product(range(1, num_points))]
+    print(points)
+    
+    model.tr_full_connection()
+    return img
+
 
 
 # %%
-AE = autoencoder().cuda()
-D_x2z = D_x2z().cuda()
-D_z2y = D_z2y().cuda()
+model = autoencoder().cuda()
 criterion = custom_loss
-optimizer = RAdam(AE.parameters(), lr=learning_rate, weight_decay=wd)#weight_decay
-print(AE)
-print(D_x2z)
-print(D_z2y)
+optimizer = RAdam(model.parameters(), lr=learning_rate, weight_decay=wd)#weight_decay
+print(model)
+
 # %%
 global in_ndarray, color, in_tensor
 in_ndarray = np.array(in_data)[:n_samples, :].astype(np.float32)
@@ -172,17 +112,17 @@ color = color[:n_samples]
 in_tensor = torch.from_numpy(in_ndarray)#in_ndarrayをテンソルにしたもの
 print(f"in_tensor.shape:{in_tensor.shape}")
 #%%
-def next_epoch(AE, epoch, g_mse, g_distance):
+def next_epoch(model, epoch, g_mse, g_distance):
     result=np.empty((0, INPUT_AXIS))
     lat_result=np.empty((0, LATENT_DIMENSION))
-    AE.eval()
+    model.eval()
     for n, data in enumerate(DataLoader(in_tensor, batch_size=BATCH_SIZE, shuffle=False)):#シャッフルしない
         #print(f'TEST:{n}')
         batch = data
         batch = batch.reshape(BATCH_SIZE, 1, 28, 28)
         batch = Variable(batch).cuda()
         # ===================forward=====================
-        output, _, _, _, lat_repr = AE(batch)
+        output, _, _, _, lat_repr = model(batch)
         lat_result=np.vstack([lat_result, lat_repr.data.cpu().numpy().reshape(BATCH_SIZE, LATENT_DIMENSION)])
     sampling_num = 3000
     rnd_idx = [random.randint(0, len(in_tensor)-1) for i in range(sampling_num)]
@@ -190,8 +130,9 @@ def next_epoch(AE, epoch, g_mse, g_distance):
     rnd_color = np.array([color[i] for i in rnd_idx])
     file_name = f"{epoch}_{g_mse}_{g_distance}"
     if LATENT_DIMENSION <= 3: plot_latent(rnd_lat_result, rnd_color).update_layout(title=file_name).write_image(f"./lat/{file_name}.png")
+    n_max = np.max(rnd_lat_result)
+    n_min = np.min(rnd_lat_result)
     return
-
 # %%
 all_loss=[]
 best_loss=99999
@@ -202,26 +143,27 @@ for epoch in range(1, num_epochs+1):
     temp_mse = 0
     temp_distance = 0
     temp_loss = 0
-    AE.train()
+    model.train()
     data_iter = DataLoader(in_tensor, batch_size=BATCH_SIZE, shuffle=True)
     for data in data_iter:
         batch = data
         #print(f'batch.shape:{batch.shape}')
         batch = batch.reshape(BATCH_SIZE, 1, 28, 28)
         batch = Variable(batch).cuda()
-        optimizer.zero_grad()
         # ===================forward=====================
-        output, in_diff_sum, lat_diff_sum, out_diff_sum, lat_repr = AE(batch)
-        criterion(output, batch, lat_repr, in_diff_sum, lat_diff_sum, out_diff_sum, AE, D_x2z, D_z2y)
+        output, in_diff_sum, lat_diff_sum, out_diff_sum, _ = model(batch)
+        loss = criterion(output, batch, in_diff_sum, lat_diff_sum, out_diff_sum)#batch = 入力 = 教師データ
         #print(loss)
         # ===================backward====================
+        optimizer.zero_grad()
+        loss.backward(retain_graph=True)
         optimizer.step()
         temp_mse += g_mse.data.sum().item() / (n_samples / BATCH_SIZE)
         temp_distance += g_distance.data.sum().item() / (n_samples / BATCH_SIZE)
-        temp_loss += (temp_mse + temp_distance)
+        temp_loss += loss.data.sum().item() / (n_samples / BATCH_SIZE)
     if temp_loss < best_loss:
         print('[BEST] ', end='')
-        torch.save(AE.state_dict(), f'./output/{epoch}.pth')
+        torch.save(model.state_dict(), f'./output/{epoch}.pth')
         best_loss = temp_loss
         es_count = 0
     es_count += 1
@@ -230,7 +172,10 @@ for epoch in range(1, num_epochs+1):
     all_loss.append([epoch, temp_loss, temp_mse, temp_distance])
     g_mse_list.append(temp_mse)
     g_distance_list.append(temp_distance)
-    next_epoch(AE, epoch, temp_mse, temp_distance)
+    next_epoch(model, epoch, temp_mse, temp_distance)
+    n = min(data.size(0), 8)
+    comparison = torch.cat([batch[:n], output.view(BATCH_SIZE, 1, 28, 28)[:n]])
+    save_image(comparison.cpu(), 'rec/' + str(epoch) + '.png', nrow=n)
     if es_count == early_stopping or (temp_distance+temp_mse)==0.0:
         print('early stopping!')
         break#early_stopping
@@ -280,7 +225,7 @@ print(len(lat_result[0]))
 # %%
 s=0
 sampling_num = 1000
-n_sampling_iter = 20
+n_sampling_iter = 70
 global_score = 0
 local_score = 0
 print(f'TIME:{elapsed_time}')
@@ -294,7 +239,7 @@ for n in range(n_sampling_iter):
     rnd_idx = [random.randint(0, n_samples-1) for i in range(sampling_num)]
     rnd_in_data = np.array([in_data[i] for i in rnd_idx])
     rnd_lat_result = np.array([lat_result[i] for i in rnd_idx])
-    local_score += CoRanking(rnd_in_data).evaluate_corank_matrix(rnd_lat_result, 50, 10) / n_sampling_iter
+    local_score += CoRanking(rnd_in_data).evaluate_corank_matrix(rnd_lat_result, 50, 5) / n_sampling_iter
 print(f'LOCAL_SCORE:{local_score}')
 
 #%%

@@ -9,10 +9,12 @@ import plotly.graph_objects as go
 import chart_studio.plotly as py
 import plotly
 from sklearn import datasets, decomposition, manifold, preprocessing
+from sklearn.datasets import make_s_curve, make_swiss_roll
 from colorsys import hsv_to_rgb
 from coranking import *
 import pandas as pd
 import plotly.express as px
+from sklearn import preprocessing
 #%%
 import umap
 import gc
@@ -20,11 +22,17 @@ import random
 from model import *
 #%%
 get_ipython().run_line_magic('matplotlib', 'inline')
-in_data, color = datasets.fetch_openml('mnist_784', version=1, return_X_y=True, data_home='./MNIST/')
-in_data = in_data-128
-in_data /= 255
+mode = 'mnist'
+n_samples = 4**7
+noise = 0
+if mode == 'curve':
+    in_data, color = make_s_curve(n_samples, noise)
+elif mode == 'roll':
+    in_data, color = make_swiss_roll(n_samples, noise)
+elif mode == 'mnist':
+    in_data, color = datasets.fetch_openml('mnist_784', version=1, return_X_y=True, data_home='./MNIST/')
 sns.set(context="paper", style="white")
-
+in_data = preprocessing.MinMaxScaler().fit_transform(in_data)
 # %%
 reducers = [
     (decomposition.PCA, {}),#"iterated_power": 1000
@@ -36,7 +44,7 @@ reducers = [
 test_data = [
     (in_data, color),
 ]
-dataset_names = ["MNIST"]
+dataset_names = [mode]
 
 n_rows = len(test_data)
 n_cols = len(reducers)
@@ -45,14 +53,11 @@ print(n_rows, n_cols, n_samples)
 
 # %%
 def plot_latent(in_data, color):
-    if LATENT_DIMENSION == 2:
-        df = pd.DataFrame({'X':in_data[:, 0], 'Y':in_data[:, 1], 'Labels':color}).sort_values('Labels')
-        fig = px.scatter(df, x='X', y='Y', color='Labels', color_discrete_sequence=px.colors.qualitative.D3, size_max=5, opacity=0.5)
-        fig.update_layout(yaxis=dict(scaleanchor='x'), showlegend=True)#縦横比を1:1に
-    if LATENT_DIMENSION == 3:
-        df = pd.DataFrame({'X':in_data[:, 0], 'Y':in_data[:, 1], 'Z':in_data[:, 2], 'Labels':color}).sort_values('Labels')
-        fig = px.scatter_3d(df, x='X', y='Y', z='Z', color='Labels', color_discrete_sequence=px.colors.qualitative.D3, size=np.repeat(10, len(in_data)), size_max=5, opacity=0.5)
-        fig.update_layout(showlegend=True)#縦横比を1:1に
+    df = pd.DataFrame({'X':in_data[:, 0], 'Y':in_data[:, 1], 'Labels':color}).sort_values('Labels')
+    if not mode=='mnist':
+        df['Labels'] = pd.qcut(df['Labels'], 10).astype(str)
+    fig = px.scatter(df, x='X', y='Y', color='Labels', color_discrete_sequence=px.colors.qualitative.D3, size_max=5, opacity=0.5)
+    fig.update_layout(yaxis=dict(scaleanchor='x'), showlegend=False)#縦横比を1:1に
     return fig
 
 
@@ -60,10 +65,10 @@ def plot_latent(in_data, color):
 strings=['PCA','UMAP', 'TSNE', 'MDS']
 s=0
 sampling_num = 1000
-n_sampling_iter=20
+n_sampling_iter=70
 for np_x, labels in test_data:
     for reducer, args in reducers:
-        if strings[s]=='MDS':
+        if strings[s]=='MDS' and mode=='mnist':
             break
         global_score = 0
         local_score = 0
@@ -81,12 +86,16 @@ for np_x, labels in test_data:
             rnd_idx = [random.randint(0, n_samples-1) for i in range(sampling_num)]
             rnd_np_x = np.array([np_x[i] for i in rnd_idx])
             rnd_result = np.array([result[i] for i in rnd_idx])
-            local_score += CoRanking(rnd_np_x).evaluate_corank_matrix(rnd_result, 50, 10) / n_sampling_iter
+            local_score += CoRanking(rnd_np_x).evaluate_corank_matrix(rnd_result, 50, 5) / n_sampling_iter
         print(f'LOCAL_SCORE:{str(reducer).split(".")[2]}:{local_score}')
         fn = f'{strings[s]}_{elapsed_time}'
-        plot_latent(result, color).update_layout(title=fn).write_image(f"./comparision/{strings[s]}.png")
+        plot_num = 3000
+        rnd_idx = [random.randint(0, n_samples-1) for i in range(plot_num)]
+        rnd_np_x = np.array([np_x[i] for i in rnd_idx])
+        rnd_result = np.array([result[i] for i in rnd_idx])
+        rnd_color = np.array([color[i] for i in rnd_idx])
+        plot_latent(rnd_result, rnd_color).update_layout(title=f"{strings[s]}_{mode}").write_image(f"./comparision/{strings[s]}_{mode}.png")
         s += 1
-
 # %%
 
 
