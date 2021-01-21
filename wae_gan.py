@@ -290,7 +290,7 @@ with torch.no_grad():
     elapsed_time = time.time() - start_time
     s=0
     sampling_num = 1000
-    n_sampling_iter = 20
+    n_sampling_iter = 70
     global_score = 0
     local_score = 0
     print(f'TIME:{elapsed_time}')
@@ -304,7 +304,7 @@ with torch.no_grad():
         rnd_idx = [random.randint(0, n_samples-1) for i in range(sampling_num)]
         rnd_in_data = np.array([in_data[i] for i in rnd_idx])
         rnd_lat_result = np.array([lat_result[i] for i in rnd_idx])
-        local_score += CoRanking(rnd_in_data).evaluate_corank_matrix(rnd_lat_result, 50, 10) / n_sampling_iter
+        local_score += CoRanking(rnd_in_data).evaluate_corank_matrix(rnd_lat_result, 50, 5) / n_sampling_iter
     print(f'LOCAL_SCORE:{local_score}')
 
     sampling_num = 3000

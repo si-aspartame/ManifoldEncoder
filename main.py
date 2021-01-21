@@ -22,7 +22,8 @@ import chart_studio.plotly as py
 import plotly
 from bayes_opt import BayesianOptimization
 from radam import *
-from model import *
+from linear_model import *
+# from model import *
 import time
 from coranking import *
 from torchvision.utils import save_image
@@ -38,8 +39,9 @@ torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
 
 # %%
-n_samples = 70000-(70000%BATCH_SIZE)#18000
-num_epochs = 10
+n_samples = 70000#18000
+s_num = 3000#epochごとにプロットする点の数
+num_epochs = 20
 learning_rate = 1e-4
 early_stopping = 50
 g_distance = torch.Tensor()
@@ -48,6 +50,7 @@ g_distance_list = []
 g_mse_list = []
 wd = 0.01
 sigma = 2#外れ値の除外に使う
+LAMBDA = 0
 
 #%%
 seed = 10
@@ -72,7 +75,7 @@ def custom_loss(output, target, in_diff_sum, lat_diff_sum, out_diff_sum):
     z2y = ((KL_divergence(SM(lat_diff_sum).log(), SM(out_diff_sum))+KL_divergence(SM(out_diff_sum).log(), SM(lat_diff_sum))) / 2)
     g_distance = (x2z+z2y) / 2
     #loss = g_distance
-    loss = g_mse + 0.5*g_distance
+    loss = g_mse + (LAMBDA*g_distance)
     return loss
 
 
@@ -102,36 +105,57 @@ def plot_manifold(model, n_max, n_min):
 # %%
 model = autoencoder().cuda()
 criterion = custom_loss
+#optimizer = optim.Adam(model.parameters(), lr=1e-3)
 optimizer = RAdam(model.parameters(), lr=learning_rate, weight_decay=wd)#weight_decay
 print(model)
 
 # %%
 global in_ndarray, color, in_tensor
+n_samples = n_samples - (n_samples%BATCH_SIZE)
 in_ndarray = np.array(in_data)[:n_samples, :].astype(np.float32)
-color = color[:n_samples]
 in_tensor = torch.from_numpy(in_ndarray)#in_ndarrayをテンソルにしたもの
+color = color[:n_samples]
 print(f"in_tensor.shape:{in_tensor.shape}")
+
+# %%
+def get_crm_score(in_data, lat_result, n_sampling_iter = 70):
+    s=0
+    sampling_num = 1000
+    G_cutoff = sampling_num
+    G_error = G_cutoff / 10
+    L_cutoff = 50
+    L_error = L_cutoff / 10
+    global_score = 0
+    local_score = 0
+    for n in range(n_sampling_iter):
+        rnd_idx = [random.randint(0, len(in_data)-1) for i in range(sampling_num)]
+        rnd_in_data = np.array([in_data[i] for i in rnd_idx])
+        rnd_lat_result = np.array([lat_result[i] for i in rnd_idx])
+        global_score += CoRanking(rnd_in_data).evaluate_corank_matrix(rnd_lat_result, G_cutoff, G_error) / n_sampling_iter
+    print(f'GLOBAL_SCORE:{global_score}')
+    for n in range(n_sampling_iter):
+        rnd_idx = [random.randint(0, len(in_data)-1) for i in range(sampling_num)]
+        rnd_in_data = np.array([in_data[i] for i in rnd_idx])
+        rnd_lat_result = np.array([lat_result[i] for i in rnd_idx])
+        local_score += CoRanking(rnd_in_data).evaluate_corank_matrix(rnd_lat_result, L_cutoff, L_error) / n_sampling_iter
+    print(f'LOCAL_SCORE:{local_score}')
+    return
+
 #%%
-def next_epoch(model, epoch, g_mse, g_distance):
-    result=np.empty((0, INPUT_AXIS))
-    lat_result=np.empty((0, LATENT_DIMENSION))
+def next_epoch(model, epoch, g_mse, g_distance, s_num=s_num):
+    sampled_lat_result=np.empty((0, LATENT_DIMENSION))
     model.eval()
-    for n, data in enumerate(DataLoader(in_tensor, batch_size=BATCH_SIZE, shuffle=False)):#シャッフルしない
-        #print(f'TEST:{n}')
-        batch = data
-        batch = batch.reshape(BATCH_SIZE, 1, 28, 28)
-        batch = Variable(batch).cuda()
+    s_num = s_num - (s_num%BATCH_SIZE)
+    sampled_tensor = torch.from_numpy(np.array(in_data)[:s_num, :].astype(np.float32))
+    sampled_color = color[:s_num]
+    for n, data in enumerate(DataLoader(sampled_tensor, batch_size=BATCH_SIZE, shuffle=False)):#シャッフルしない
+        batch = Variable(data.reshape(BATCH_SIZE, 1, 28, 28)).cuda()
         # ===================forward=====================
         output, _, _, _, lat_repr = model(batch)
-        lat_result=np.vstack([lat_result, lat_repr.data.cpu().numpy().reshape(BATCH_SIZE, LATENT_DIMENSION)])
-    sampling_num = 3000
-    rnd_idx = [random.randint(0, len(in_tensor)-1) for i in range(sampling_num)]
-    rnd_lat_result = np.array([lat_result[i] for i in rnd_idx])
-    rnd_color = np.array([color[i] for i in rnd_idx])
+        sampled_lat_result = np.vstack([sampled_lat_result, lat_repr.data.cpu().numpy().reshape(BATCH_SIZE, LATENT_DIMENSION)])
     file_name = f"{epoch}_{g_mse}_{g_distance}"
-    if LATENT_DIMENSION <= 3: plot_latent(rnd_lat_result, rnd_color).update_layout(title=file_name).write_image(f"./lat/{file_name}.png")
-    n_max = np.max(rnd_lat_result)
-    n_min = np.min(rnd_lat_result)
+    if LATENT_DIMENSION <= 3: plot_latent(sampled_lat_result, sampled_color).update_layout(title=file_name).write_image(f"./lat/{file_name}.png")
+    get_crm_score(sampled_tensor.cpu().numpy(), sampled_lat_result, n_sampling_iter = 10)
     return
 # %%
 all_loss=[]
@@ -144,12 +168,9 @@ for epoch in range(1, num_epochs+1):
     temp_distance = 0
     temp_loss = 0
     model.train()
-    data_iter = DataLoader(in_tensor, batch_size=BATCH_SIZE, shuffle=True)
+    data_iter = DataLoader(in_tensor, batch_size=BATCH_SIZE, num_workers=0, shuffle=True)
     for data in data_iter:
-        batch = data
-        #print(f'batch.shape:{batch.shape}')
-        batch = batch.reshape(BATCH_SIZE, 1, 28, 28)
-        batch = Variable(batch).cuda()
+        batch = Variable(data.reshape(BATCH_SIZE, 1, 28, 28)).cuda()
         # ===================forward=====================
         output, in_diff_sum, lat_diff_sum, out_diff_sum, _ = model(batch)
         loss = criterion(output, batch, in_diff_sum, lat_diff_sum, out_diff_sum)#batch = 入力 = 教師データ
@@ -190,16 +211,15 @@ lat_result = np.empty((0, LATENT_DIMENSION))
 best_model.eval()
 for n, data in enumerate(DataLoader(in_tensor, batch_size = BATCH_SIZE, shuffle = False)):#シャッフルしない
     #print(f'TEST:{n}')
-    batch = data
-    batch = batch.reshape(BATCH_SIZE, 1, 28, 28)
-    batch = Variable(batch).cuda()
+    batch = Variable(data.reshape(BATCH_SIZE, 1, 28, 28)).cuda()
     # ===================forward=====================
     output, _, _, _, lat_repr = best_model(batch)
     lat_result=np.vstack([lat_result, lat_repr.data.cpu().numpy().reshape(BATCH_SIZE, LATENT_DIMENSION)])
 #%%
 elapsed_time = time.time() - start_time
 print(f'elapsed_time:{elapsed_time}')
-
+#%%
+get_crm_score(in_tensor.cpu().numpy(), lat_result)
 #%%
 print(len(in_ndarray[0]))#in_ndarrayはn_samples個
 print(len(lat_result[0]))
@@ -221,25 +241,5 @@ print(len(lat_result[0]))
 # loss_fig.add_trace(go.Scatter(x = list(range(0, len(all_loss))), y = MA_g_mse_list, name='mse'))
 # loss_fig.add_trace(go.Scatter(x = list(range(0, len(all_loss))), y = MA_g_distance_list, name='distance'))
 # plotly.offline.iplot(loss_fig, filename='mse and distance progress')
-
-# %%
-s=0
-sampling_num = 1000
-n_sampling_iter = 70
-global_score = 0
-local_score = 0
-print(f'TIME:{elapsed_time}')
-for n in range(n_sampling_iter):
-    rnd_idx = [random.randint(0, n_samples-1) for i in range(sampling_num)]
-    rnd_in_data = np.array([in_data[i] for i in rnd_idx])
-    rnd_lat_result = np.array([lat_result[i] for i in rnd_idx])
-    global_score += CoRanking(rnd_in_data).evaluate_corank_matrix(rnd_lat_result, sampling_num, 100) / n_sampling_iter
-print(f'GLOBAL_SCORE:{global_score}')
-for n in range(n_sampling_iter):
-    rnd_idx = [random.randint(0, n_samples-1) for i in range(sampling_num)]
-    rnd_in_data = np.array([in_data[i] for i in rnd_idx])
-    rnd_lat_result = np.array([lat_result[i] for i in rnd_idx])
-    local_score += CoRanking(rnd_in_data).evaluate_corank_matrix(rnd_lat_result, 50, 5) / n_sampling_iter
-print(f'LOCAL_SCORE:{local_score}')
 
 #%%

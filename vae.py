@@ -21,7 +21,7 @@ get_ipython().run_line_magic('load_ext', 'autoreload')
 get_ipython().run_line_magic('autoreload', '2')
 parser = argparse.ArgumentParser(description='VAE MNIST Example')
 parser.add_argument('--batch-size', type=int, default=128, metavar='N',help='input batch size for training (default: 128)')
-parser.add_argument('--epochs', type=int, default=10, metavar='N',help='number of epochs to train (default: 10)')
+parser.add_argument('--epochs', type=int, default=50, metavar='N',help='number of epochs to train (default: 10)')
 parser.add_argument('--no-cuda', action='store_true', default=False,help='disables CUDA training')
 parser.add_argument('--seed', type=int, default=1, metavar='S',help='random seed (default: 1)')
 parser.add_argument('--log-interval', type=int, default=10, metavar='N',help='how many batches to wait before logging training status')
@@ -46,14 +46,16 @@ class VAE(nn.Module):
         super(VAE, self).__init__()
 
         self.fc1 = nn.Linear(784, 400)
-        self.fc21 = nn.Linear(400, 2)
-        self.fc22 = nn.Linear(400, 2)
+        self.fc21A = nn.Linear(400, 200)
+        self.fc21B = nn.Linear(200, 2)
+        self.fc22A = nn.Linear(400, 200)
+        self.fc22B = nn.Linear(200, 2)
         self.fc3 = nn.Linear(2, 400)
         self.fc4 = nn.Linear(400, 784)
 
     def encode(self, x):
         h1 = F.relu(self.fc1(x))
-        return self.fc21(h1), self.fc22(h1)#20個ずつのμとσ
+        return self.fc21B(self.fc21A(h1)), self.fc22B(self.fc22A(h1))#20個ずつのμとσ
 
     def reparameterize(self, mu, logvar):
         std = torch.exp(0.5*logvar)
