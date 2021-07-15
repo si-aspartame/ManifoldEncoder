@@ -20,7 +20,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 import chart_studio.plotly as py
 import plotly
-from bayes_opt import BayesianOptimization
 from radam import *
 from linear_model import *
 # from model import *
@@ -39,18 +38,17 @@ torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
 
 # %%
-n_samples = 70000#18000
+n_samples = 10000#70000#
 s_num = 3000#epochごとにプロットする点の数
-num_epochs = 20
+num_epochs = 100
 learning_rate = 1e-4
 early_stopping = 50
 g_distance = torch.Tensor()
 g_mse = torch.Tensor()
 g_distance_list = []
 g_mse_list = []
-wd = 0.01
-sigma = 2#外れ値の除外に使う
-LAMBDA = 0
+wd = 0#0.01
+LAMBDA = 0.1#
 
 #%%
 seed = 10
@@ -61,21 +59,22 @@ torch.cuda.manual_seed(seed)
 
 # %%q
 in_data, color = fetch_openml('mnist_784', version=1, return_X_y=True, data_home='./MNIST/')
-in_data = preprocessing.MinMaxScaler().fit_transform(in_data)
+in_data = preprocessing.MinMaxScaler(feature_range=(-1, 1)).fit_transform(in_data)
 #in_data /= 255
-
+#print(np.min(in_data), np.max(in_data))
 #%%
 def custom_loss(output, target, in_diff_sum, lat_diff_sum, out_diff_sum):
     global g_distance, g_mse
-    KL_divergence = nn.KLDivLoss().cuda()#reduction="sum"
+    KL_divergence = nn.KLDivLoss().cuda()
     SM = nn.Softmax(dim=0).cuda()
-    MSE = nn.MSELoss(reduction='mean').cuda()
+    MSE = nn.MSELoss().cuda()#reduction='mean'
     g_mse = MSE(output, target)
-    x2z = ((KL_divergence(SM(in_diff_sum).log(), SM(lat_diff_sum))+KL_divergence(SM(lat_diff_sum).log(), SM(in_diff_sum))) / 2)
-    z2y = ((KL_divergence(SM(lat_diff_sum).log(), SM(out_diff_sum))+KL_divergence(SM(out_diff_sum).log(), SM(lat_diff_sum))) / 2)
-    g_distance = (x2z+z2y) / 2
-    #loss = g_distance
-    loss = g_mse + (LAMBDA*g_distance)
+    #x2z = ((KL_divergence(SM(in_diff_sum).log(), SM(lat_diff_sum))+KL_divergence(SM(lat_diff_sum).log(), SM(in_diff_sum))) / 2)
+    #z2y = ((KL_divergence(SM(lat_diff_sum).log(), SM(out_diff_sum))+KL_divergence(SM(out_diff_sum).log(), SM(lat_diff_sum))) / 2)
+    x2z = torch.abs(torch.sum(lat_diff_sum / in_diff_sum) - BATCH_SIZE)
+    z2y = torch.abs(torch.sum(lat_diff_sum / out_diff_sum) - BATCH_SIZE)
+    g_distance = ((x2z+z2y) / 2)
+    loss = g_mse + (LAMBDA * g_distance)
     return loss
 
 
@@ -91,22 +90,10 @@ def plot_latent(in_data, color):
         fig.update_layout(showlegend=True)#縦横比を1:1に
     return fig
 
-def plot_manifold(model, n_max, n_min):
-    model.eval()
-    num_points = BATCH_SIZE * 2
-    points = [[n*(n_max-n_min)/num_points, m*(n_max-n_min)/num_points] for n, m in itertools.product(range(1, num_points))]
-    print(points)
-    
-    model.tr_full_connection()
-    return img
-
-
-
 # %%
 model = autoencoder().cuda()
 criterion = custom_loss
-#optimizer = optim.Adam(model.parameters(), lr=1e-3)
-optimizer = RAdam(model.parameters(), lr=learning_rate, weight_decay=wd)#weight_decay
+optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=wd)#weight_decay
 print(model)
 
 # %%
@@ -118,7 +105,7 @@ color = color[:n_samples]
 print(f"in_tensor.shape:{in_tensor.shape}")
 
 # %%
-def get_crm_score(in_data, lat_result, n_sampling_iter = 70):
+def get_crm_score(in_data, lat_result, n_sampling_iter = 100):
     s=0
     sampling_num = 1000
     G_cutoff = sampling_num
@@ -131,13 +118,13 @@ def get_crm_score(in_data, lat_result, n_sampling_iter = 70):
         rnd_idx = [random.randint(0, len(in_data)-1) for i in range(sampling_num)]
         rnd_in_data = np.array([in_data[i] for i in rnd_idx])
         rnd_lat_result = np.array([lat_result[i] for i in rnd_idx])
-        global_score += CoRanking(rnd_in_data).evaluate_corank_matrix(rnd_lat_result, G_cutoff, G_error) / n_sampling_iter
+        global_score += CRM(rnd_in_data).evaluate_crm(rnd_lat_result, G_cutoff, G_error) / n_sampling_iter
     print(f'GLOBAL_SCORE:{global_score}')
     for n in range(n_sampling_iter):
         rnd_idx = [random.randint(0, len(in_data)-1) for i in range(sampling_num)]
         rnd_in_data = np.array([in_data[i] for i in rnd_idx])
         rnd_lat_result = np.array([lat_result[i] for i in rnd_idx])
-        local_score += CoRanking(rnd_in_data).evaluate_corank_matrix(rnd_lat_result, L_cutoff, L_error) / n_sampling_iter
+        local_score += CRM(rnd_in_data).evaluate_crm(rnd_lat_result, L_cutoff, L_error) / n_sampling_iter
     print(f'LOCAL_SCORE:{local_score}')
     return
 
@@ -155,7 +142,7 @@ def next_epoch(model, epoch, g_mse, g_distance, s_num=s_num):
         sampled_lat_result = np.vstack([sampled_lat_result, lat_repr.data.cpu().numpy().reshape(BATCH_SIZE, LATENT_DIMENSION)])
     file_name = f"{epoch}_{g_mse}_{g_distance}"
     if LATENT_DIMENSION <= 3: plot_latent(sampled_lat_result, sampled_color).update_layout(title=file_name).write_image(f"./lat/{file_name}.png")
-    get_crm_score(sampled_tensor.cpu().numpy(), sampled_lat_result, n_sampling_iter = 10)
+    #get_crm_score(sampled_tensor.cpu().numpy(), sampled_lat_result, n_sampling_iter = 100)
     return
 # %%
 all_loss=[]
@@ -219,7 +206,7 @@ for n, data in enumerate(DataLoader(in_tensor, batch_size = BATCH_SIZE, shuffle 
 elapsed_time = time.time() - start_time
 print(f'elapsed_time:{elapsed_time}')
 #%%
-get_crm_score(in_tensor.cpu().numpy(), lat_result)
+get_crm_score(in_tensor.cpu().numpy(), lat_result, n_sampling_iter = 100)
 #%%
 print(len(in_ndarray[0]))#in_ndarrayはn_samples個
 print(len(lat_result[0]))

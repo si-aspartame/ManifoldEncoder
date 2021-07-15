@@ -22,7 +22,7 @@ import random
 from model import *
 #%%
 get_ipython().run_line_magic('matplotlib', 'inline')
-mode = 'mnist'
+mode = 'csv'
 n_samples = 4**7
 noise = 0
 if mode == 'curve':
@@ -31,6 +31,11 @@ elif mode == 'roll':
     in_data, color = make_swiss_roll(n_samples, noise)
 elif mode == 'mnist':
     in_data, color = datasets.fetch_openml('mnist_784', version=1, return_X_y=True, data_home='./MNIST/')
+elif mode == 'csv':
+    df = pd.read_csv('./data/CSV/ofm_struct_gap.csv').dropna(how='any', axis=0)
+    #df = pd.read_csv('./data/CSV/dl_struct_gap.csv').dropna(how='any', axis=0)
+    color = df[df.columns[1]].values
+    in_data = df.drop(df.columns[[0, 1]], axis=1).values
 sns.set(context="paper", style="white")
 in_data = preprocessing.MinMaxScaler().fit_transform(in_data)
 # %%
@@ -54,7 +59,7 @@ print(n_rows, n_cols, n_samples)
 # %%
 def plot_latent(in_data, color):
     df = pd.DataFrame({'X':in_data[:, 0], 'Y':in_data[:, 1], 'Labels':color}).sort_values('Labels')
-    if not mode=='mnist':
+    if mode == 'mnist':#not?
         df['Labels'] = pd.qcut(df['Labels'], 10).astype(str)
     fig = px.scatter(df, x='X', y='Y', color='Labels', color_discrete_sequence=px.colors.qualitative.D3, size_max=5, opacity=0.5)
     fig.update_layout(yaxis=dict(scaleanchor='x'), showlegend=False)#縦横比を1:1に
@@ -68,7 +73,11 @@ sampling_num = 1000
 n_sampling_iter=70
 for np_x, labels in test_data:
     for reducer, args in reducers:
-        if strings[s]=='MDS' and mode=='mnist':
+    #####################################
+        # if strings[s]=='UMAP':
+        #     break
+    #####################################
+        if strings[s]=='MDS' and (mode=='mnist' or mode =='csv'):
             break
         global_score = 0
         local_score = 0
@@ -80,13 +89,13 @@ for np_x, labels in test_data:
             rnd_idx = [random.randint(0, n_samples-1) for i in range(sampling_num)]
             rnd_np_x = np.array([np_x[i] for i in rnd_idx])
             rnd_result = np.array([result[i] for i in rnd_idx])
-            global_score += CoRanking(rnd_np_x).evaluate_corank_matrix(rnd_result, sampling_num, 100) / n_sampling_iter
+            global_score += CRM(rnd_np_x).evaluate_crm(rnd_result, sampling_num, 100) / n_sampling_iter
         print(f'GLOBAL_SCORE:{str(reducer).split(".")[2]}:{global_score}')
         for n in range(n_sampling_iter):
             rnd_idx = [random.randint(0, n_samples-1) for i in range(sampling_num)]
             rnd_np_x = np.array([np_x[i] for i in rnd_idx])
             rnd_result = np.array([result[i] for i in rnd_idx])
-            local_score += CoRanking(rnd_np_x).evaluate_corank_matrix(rnd_result, 50, 5) / n_sampling_iter
+            local_score += CRM(rnd_np_x).evaluate_crm(rnd_result, 50, 5) / n_sampling_iter
         print(f'LOCAL_SCORE:{str(reducer).split(".")[2]}:{local_score}')
         fn = f'{strings[s]}_{elapsed_time}'
         plot_num = 3000
