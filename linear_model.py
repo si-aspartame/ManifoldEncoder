@@ -8,8 +8,8 @@ from torch.nn.parameter import Parameter
 import numpy as np
 from scipy.special import comb
 BATCH_SIZE = 3
-in_X = 28#1#
-in_Y = 28#36#58#
+in_X = 1#28#
+in_Y = 58#28#36#
 INPUT_AXIS = in_X * in_Y
 
 LATENT_DIMENSION = 2
@@ -25,11 +25,12 @@ def make_distance_vector(input_tensor):
 class autoencoder(nn.Module):
     def __init__(self):
         super(autoencoder, self).__init__()
-        self.fc1_1 = nn.Linear(INPUT_AXIS, 400)
-        self.fc1_2 = nn.Linear(400, 200)
-        self.fc1_3 = nn.Linear(200, 50)
-        self.fc2   = nn.Linear(50, LATENT_DIMENSION)
-        self.fc3   = nn.Linear(LATENT_DIMENSION, 50)
+        self.fc1_1 = nn.Linear(INPUT_AXIS, 29)
+        self.fc1_2 = nn.Linear(29, 20)
+        self.fc1_3 = nn.Linear(20, 10)
+        self.fc2   = nn.Linear(10, LATENT_DIMENSION)
+        self.fc3   = nn.Linear(LATENT_DIMENSION, INPUT_AXIS)
+
         self.fc4_1 = nn.Linear(50, 200)
         self.fc4_2 = nn.Linear(200, 400)
         self.fc4_3 = nn.Linear(400, INPUT_AXIS)
@@ -54,25 +55,25 @@ class autoencoder(nn.Module):
         x = self.fc1_2(x)
         x = F.leaky_relu(x)
         x = self.fc1_3(x)
-        x = F.leaky_relu(x)
         return x
 
     def full_connection(self, z):
         z = self.fc2(z)
+        #z = F.leaky_relu(z)
         return z
 
     def tr_full_connection(self, z):
         y = self.fc3(z)
-        y = F.leaky_relu(y)
         return y
 
     def decoder(self, y):
-        y = self.fc4_1(y)
-        y = F.leaky_relu(y)
-        y = self.fc4_2(y)
-        y = F.leaky_relu(y)
-        y = self.fc4_3(y)
-        y = torch.tanh(y)
+        # y = F.leaky_relu(y)
+        # # y = self.fc4_1(y)
+        # # y = F.leaky_relu(y)
+        # # y = self.fc4_2(y)
+        # # y = F.leaky_relu(y)
+        # y = self.fc4_3(y)
+        #y = torch.tanh(y)
         return y
     
     def forward(self, x):

@@ -32,9 +32,9 @@ torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
 # %%
 #ハイパーパラメータ
-n_samples = int(39068/4)#83804#int(83804/4)#10000#
+n_samples = 83804#int(83804/4)#10000#int(39068/4)#
 s_num = 3000
-num_epochs = 50
+num_epochs = 20
 learning_rate = 1e-3
 early_stopping = 50
 g_distance = torch.Tensor()
@@ -54,8 +54,8 @@ torch.cuda.manual_seed(seed)
 
 
 # %%
-df = pd.read_csv('./data/CSV/ofm_struct_gap.csv').dropna(how='any', axis=0)
-#df = pd.read_csv('./data/CSV/dl_struct_gap.csv').dropna(how='any', axis=0)
+#df = pd.read_csv('./data/CSV/ofm_struct_gap.csv').dropna(how='any', axis=0)
+df = pd.read_csv('./data/CSV/dl_struct_gap.csv').dropna(how='any', axis=0)
 color = df[df.columns[1]].values
 in_data = df.drop(df.columns[[0, 1]], axis=1).values
 # n_samples = len(color)
@@ -89,7 +89,7 @@ def custom_loss(output, target, in_diff_sum, lat_diff_sum, out_diff_sum):
     x2z = torch.abs(torch.sum(lat_diff_sum / in_diff_sum) - BATCH_SIZE)
     z2y = torch.abs(torch.sum(lat_diff_sum / out_diff_sum) - BATCH_SIZE)
     g_distance = (x2z+z2y) / 2
-    loss = g_distance#g_mse + (LAMBDA*g_distance)
+    loss = g_mse# + (LAMBDA*g_distance)
     return loss
 
 
@@ -220,11 +220,36 @@ print(f'best_iteration:{all_loss[best_iteration]}')
 best_model = autoencoder().cuda()
 best_model.load_state_dict(torch.load(f'./output/{all_loss[best_iteration][0]}.pth'))
 lat_result = np.empty((0, LATENT_DIMENSION))
+out_result = np.empty((0, INPUT_AXIS))
 best_model.eval()
 for n, data in enumerate(DataLoader(in_tensor, batch_size = BATCH_SIZE, shuffle = False)):#シャッフルしない
     batch = Variable(data.reshape(BATCH_SIZE, 1, in_X, in_Y)).cuda()
     output, _, _, _, lat_repr = best_model(batch)
-    lat_result=np.vstack([lat_result, lat_repr.data.cpu().numpy().reshape(BATCH_SIZE, LATENT_DIMENSION)])
+    lat_result = np.vstack([lat_result, lat_repr.data.cpu().numpy().reshape(BATCH_SIZE, LATENT_DIMENSION)])
+    out_result = np.vstack([out_result, output.data.cpu().numpy().reshape(BATCH_SIZE,INPUT_AXIS)])
+#%%
+out_df = pd.DataFrame(out_result)
+from pylab import rcParams
+rcParams['figure.figsize'] = 15, 15
+out_df.hist()
+#%%
+out_df = pd.DataFrame(out_result).head(80000)
+in_df = pd.DataFrame(in_data).head(80000)
+import matplotlib.pyplot as plt
+for n, _ in enumerate(out_df.columns):
+    if n+1 == 58:
+        break
+    ax = out_df[out_df.columns[n]].hist(alpha=0.5)
+    in_df[in_df.columns[n]].hist(alpha=0.5)
+    fig = ax.get_figure()
+    #plt.legend(f'in{n}', f'out{n}')
+    fig.savefig(f'result/in_out/{n}_{n}.png')
+    plt.cla()
+    plt.clf()
+#%%
+in_df = preprocessing.MinMaxScaler(feature_range=(-1, 1)).fit_transform(in_data.reshape(-1, 1))
+in_df = in_df.reshape(-1, len(df.drop(df.columns[[0, 1]], axis=1).columns))
+#%%
 
 
 # %%
@@ -249,4 +274,9 @@ rnd_color = np.array([color[i] for i in rnd_idx])
 if LATENT_DIMENSION <= 3:
     plotly.offline.iplot(plot_latent(rnd_lat_result, rnd_color), filename='latent representation')
 
+# %%
+x_axis = np.linspace(1, num_epochs, num_epochs)
+mse_df = pd.DataFrame({'epochs':x_axis, 'mse':g_mse_list})
+fig = px.line(mse_df, x="epochs", y="mse")
+fig.show()
 # %%
